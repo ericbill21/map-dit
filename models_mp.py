@@ -96,7 +96,7 @@ class LabelEmbedder(nn.Module):
 #################################################################################
 #                                 UTILS BY ERIC                                 #
 #################################################################################
-class Attention2(nn.Module):
+class Attention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=True, qk_scale=None, variant="dot", **kwargs):
         super().__init__()
         self.variant = variant
@@ -106,36 +106,23 @@ class Attention2(nn.Module):
         self.head_dim = dim // num_heads
 
         self.scale = qk_scale or self.head_dim ** -0.5
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
 
-        self.query = nn.Linear(dim, dim, bias=qkv_bias)
-        self.key = nn.Linear(dim, dim, bias=qkv_bias)
-        self.value = nn.Linear(dim, dim, bias=qkv_bias)
-    
     def forward(self, x):
-        # Extract dimensions and check if hidden dimension is correct
         B, N, D = x.shape
+
         assert D == self.head_dim * self.num_heads, 'Input dimension not equal to model dimension'
         
-        Q = self.query(x).reshape(B, N, self.num_heads, self.head_dim)
-        K = self.key(x).reshape(B, N, self.num_heads, self.head_dim)
-        V = self.value(x).reshape(B, N, self.num_heads, self.head_dim)
+        Q, K, V = self.qkv(x).chunk(3, dim=-1)
+        Q = Q.reshape(B, N, self.num_heads, self.head_dim)
+        K = K.reshape(B, N, self.num_heads, self.head_dim)
+        V = V.reshape(B, N, self.num_heads, self.head_dim)
 
-        # Choose Attention Variant
-        match self.variant:
-            case "cosine":
-                Q = F.normalize(Q, dim=-1)
-                K = F.normalize(K, dim=-1)
-                att_raw = torch.einsum('BNHD, BNGD -> BNHG', Q, K) * self.scale
-                att = F.softmax(att_raw, dim=-1)
+        if self.variant == "cosine":
+            Q = F.normalize(Q, dim=-1)
+            K = F.normalize(K, dim=-1)
 
-            case "dot":  
-                att_raw = torch.einsum('BNHD, BNGD -> BNHG', Q, K) * self.scale
-                att = F.softmax(att_raw, dim=-1)
-            
-            case _:
-                raise NotImplementedError(f"Attention variant {self.variant} not implemented")
-
-        return torch.einsum('BNHG, BNGD -> BNHD', att, V).reshape(B, N, D)  
+        return F.scaled_dot_product_attention(Q, K, V, scale=self.scale).reshape(B, N, D)
         
 
 #################################################################################
