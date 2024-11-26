@@ -96,7 +96,7 @@ class LabelEmbedder(nn.Module):
 #################################################################################
 #                                 UTILS BY ERIC                                 #
 #################################################################################
-class Attention(nn.Module):
+class Attention2(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=True, qk_scale=None, variant="dot", **kwargs):
         super().__init__()
         self.variant = variant
@@ -114,9 +114,11 @@ class Attention(nn.Module):
         assert D == self.head_dim * self.num_heads, 'Input dimension not equal to model dimension'
         
         Q, K, V = self.qkv(x).chunk(3, dim=-1)
-        Q = Q.reshape(B, N, self.num_heads, self.head_dim)
-        K = K.reshape(B, N, self.num_heads, self.head_dim)
-        V = V.reshape(B, N, self.num_heads, self.head_dim)
+
+        # scaled_dot_product_attention expects B, H, N, D
+        Q = Q.reshape(B, self.num_heads, N, self.head_dim)
+        K = K.reshape(B, self.num_heads, N, self.head_dim)
+        V = V.reshape(B, self.num_heads, N, self.head_dim)
 
         if self.variant == "cosine":
             Q = F.normalize(Q, dim=-1)
