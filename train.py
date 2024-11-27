@@ -15,7 +15,6 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from torchvision.datasets import ImageFolder
 from torchvision import transforms
 import numpy as np
 from collections import OrderedDict
@@ -94,27 +93,34 @@ def center_crop_arr(pil_image, image_size):
     return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
 
 
-class CustomDataset(Dataset):
-    def __init__(self, features_dir, labels_dir):
-        self.features_dir = features_dir
-        self.labels_dir = labels_dir
+class ImageNet32(Dataset):
+    def __init__(self, features_dir, transform=None):
+        self.transform = transform
 
-        self.features_files = sorted(os.listdir(features_dir))
-        self.labels_files = sorted(os.listdir(labels_dir))
+        data, labels = [], []
+        for file in sorted(os.listdir(features_dir)):
+            batch = np.load(os.path.join(features_dir, file))
+            
+            data.append(batch["data"])
+            labels.append(batch["labels"])
+            break #FIXME: remove this line 
+        
+        self.images = torch.from_numpy(np.concatenate(data)).reshape(-1, 3, 32, 32).byte()
+        self.labels = torch.from_numpy(np.concatenate(labels)) - 1 # 1-indexed to 0-indexed
+
+        assert self.images.size(0) == self.labels.size(0), 'Data and labels do not match'
 
     def __len__(self):
-        assert len(self.features_files) == len(self.labels_files), \
-            "Number of feature files and label files should be same"
-        return len(self.features_files)
+        return len(self.images)
 
     def __getitem__(self, idx):
-        feature_file = self.features_files[idx]
-        label_file = self.labels_files[idx]
+        img = self.images[idx] / 255
+        labels = self.labels[idx]
 
-        features = np.load(os.path.join(self.features_dir, feature_file))
-        labels = np.load(os.path.join(self.labels_dir, label_file))
-        return torch.from_numpy(features), torch.from_numpy(labels)
+        if self.transform:
+            img = self.transform(img)
 
+        return img, labels
 
 #################################################################################
 #                                  Training Loop                                #
@@ -124,7 +130,8 @@ def main(args):
     """
     Trains a new DiT model.
     """
-    assert torch.cuda.is_available(), "Training currently requires at least one GPU."
+    #FIXME: Undo comment, add back in when training on GPU
+    # assert torch.cuda.is_available(), "Training currently requires at least one GPU."
 
     # Setup accelerator:
     accelerator = Accelerator()
@@ -142,18 +149,19 @@ def main(args):
         logger.info(f"Experiment directory created at {experiment_dir}")
 
     # Create model:
-    assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
-    latent_size = args.image_size // 8
     model = DiT_models[args.model](
-        input_size=latent_size,
+        input_size=3*32*32,
         num_classes=args.num_classes
     )
+
     # Note that parameter initialization is done within the DiT constructor
     model = model.to(device)
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     requires_grad(ema, False)
+
+    # TODO: REMOVE VAE DEPENDENCY
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
-    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
+    
     if accelerator.is_main_process:
         logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
@@ -161,17 +169,20 @@ def main(args):
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
 
     # Setup data:
-    features_dir = f"{args.feature_path}/imagenet256_features"
-    labels_dir = f"{args.feature_path}/imagenet256_labels"
-    dataset = CustomDataset(features_dir, labels_dir)
+    transform = transforms.Compose([
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
+        transforms.RandomHorizontalFlip(),
+    ])
+    dataset = ImageNet32(args.feature_path, transform=transform)
     loader = DataLoader(
-        dataset,
-        batch_size=int(args.global_batch_size // accelerator.num_processes),
-        shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=True,
-        drop_last=True
-    )
+            dataset,
+            batch_size=int(args.global_batch_size // accelerator.num_processes),
+            shuffle=True,
+            num_workers=args.num_workers,
+            pin_memory=True,
+            drop_last=True
+        )
+    
     if accelerator.is_main_process:
         logger.info(f"Dataset contains {len(dataset):,} images ({args.feature_path})")
 
@@ -256,7 +267,6 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=1400)
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
-    parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
