@@ -1,62 +1,168 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
-# References:
-# GLIDE: https://github.com/openai/glide-text2im
-# MAE: https://github.com/facebookresearch/mae/blob/main/models_mae.py
-# --------------------------------------------------------
-
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 import numpy as np
 import math
-from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
 
 
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
 
-#################################################################################
-#               Embedding Layers for Timesteps and Class Labels                 #
-#################################################################################
+class SimpleLinear(nn.Module):
+    def __init__(self, in_dim: int, out_dim: int):
+        super().__init__()
+
+        self.linear = nn.Linear(in_dim+1, out_dim, bias=False)
+
+        nn.init.kaiming_uniform_(self.linear.weight)
+
+    def forward(self, x):
+        """
+        Args:
+            x: (...B, in_dim)
+        
+        Returns: (...B, out_dim)
+        """
+
+        # Concatenate 1s to input
+        x = torch.cat([x, torch.ones(*x.shape[:-1], 1).to(x.device)], dim=-1)
+        return self.linear(x)
+
+
+class AdaLNModulation(nn.Module):
+    def __init__(self, hidden_dim: int, num_modulates: int):
+        super().__init__()
+
+        self.num_modulates = num_modulates
+        self.net = nn.Sequential(
+            nn.SiLU(),
+            SimpleLinear(hidden_dim, 2 * num_modulates * hidden_dim),
+        )
+
+        # Always init at zero
+        nn.init.zeros_(self.net[-1].linear.weight)
+    
+    def forward(self, x):
+        return self.net(x).chunk(2 * self.num_modulates, dim=1)
+
+
+class Attention(nn.Module):
+    def __init__(self, in_dim: int, num_heads: int, use_cosine_attention: bool=False):
+        super().__init__()
+
+        assert in_dim % num_heads == 0
+
+        self.use_cosine = use_cosine_attention
+        self.num_heads = num_heads
+        self.head_dim = in_dim // num_heads
+
+        self.qkv = SimpleLinear(in_dim, in_dim * 3)
+        self.out_proj = SimpleLinear(in_dim, in_dim)
+
+        self.scale = 1.0 / math.sqrt(self.head_dim)
+        if self.use_cosine:
+            self.scale = math.sqrt(self.head_dim)
+
+    def forward(self, x):
+        """
+        Args:
+            x: (...B, T, D)
+        
+        Returns: (...B, T, D)
+        """
+
+        T, D = x.shape[-2:]
+
+        q, k, v = self.qkv(x).chunk(3, dim=-1)                              # (...B, T, D)
+
+        q = q.view(-1, T, self.num_heads, self.head_dim).transpose(-3, -2)  # (...B, H, T, D') where D' = D / H
+        k = k.view(-1, T, self.num_heads, self.head_dim).transpose(-3, -2)  # (...B, H, T, D')
+        v = v.view(-1, T, self.num_heads, self.head_dim).transpose(-3, -2)  # (...B, H, T, D')
+
+        if self.use_cosine:
+            q = F.normalize(q, dim=-1)
+            k = F.normalize(k, dim=-1)
+
+        attn = F.scaled_dot_product_attention(q, k, v, scale=self.scale)    # (...B, H, T, D')
+        attn = attn.transpose(-3, -2)                                       # (...B, T, H, D')
+        attn = attn.reshape(*x.shape[:-2], T, D)                             # (...B, T, D)
+
+        return self.out_proj(attn)
+
+
+class MLP(nn.Module):
+    def __init__(self, in_dim: int, out_dim: int, mlp_ratio: float=4.0, hidden_dim: int=None):
+        super().__init__()
+
+        self.hidden_dim = int(in_dim * mlp_ratio) if hidden_dim is None else hidden_dim
+        self.net = nn.Sequential(
+            SimpleLinear(in_dim, self.hidden_dim),
+            nn.GELU(approximate="tanh"),
+            SimpleLinear(self.hidden_dim, out_dim),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class PatchEmbedder(nn.Module):
+    """Embeds image patches."""
+
+    def __init__(self, patch_size: int, in_channels: int, hidden_size: int):
+        super().__init__()
+
+        self.proj = nn.Conv2d(in_channels, hidden_size, kernel_size=patch_size, stride=patch_size, bias=True)
+
+        # Initialize patch_embed like nn.Linear (instead of nn.Conv2d)
+        nn.init.kaiming_uniform_(self.proj.weight.data.view(hidden_size, -1))
+        nn.init.zeros_(self.proj.bias)
+
+    def forward(self, x):
+        """
+        Args:
+            x: (...B, C, H, W)
+
+        Returns: (...B, T, D) where T = H * W / patch_size ** 2
+        """
+
+        x = self.proj(x)         # (...B, D, H', W') where H' = H // patch_size, W' = W // patch_size
+        x = x.flatten(-2)        # (...B, D, T) where T = H' * W'
+        x = x.transpose(-1, -2)  # (...B, T, D)
+        return x
+
 
 class TimestepEmbedder(nn.Module):
-    """
-    Embeds scalar timesteps into vector representations.
-    """
+    """Embeds scalar timesteps into vector representations."""
+
     def __init__(self, hidden_size, frequency_embedding_size=256):
         super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(frequency_embedding_size, hidden_size, bias=True),
-            nn.SiLU(),
-            nn.Linear(hidden_size, hidden_size, bias=True),
-        )
+
+        self.mlp = MLP(frequency_embedding_size, hidden_size, hidden_dim=hidden_size)
         self.frequency_embedding_size = frequency_embedding_size
 
     @staticmethod
     def timestep_embedding(t, dim, max_period=10000):
+        """Create sinusoidal timestep embeddings.
+
+        Args:
+            t: a 1-D Tensor of N indices, one per batch element (may be fractional)
+            dim: the dimension of the output (D)
+            max_period: controls the minimum frequency of the embeddings
+
+        Returns: positional embeddings (N, D)
         """
-        Create sinusoidal timestep embeddings.
-        :param t: a 1-D Tensor of N indices, one per batch element.
-                          These may be fractional.
-        :param dim: the dimension of the output.
-        :param max_period: controls the minimum frequency of the embeddings.
-        :return: an (N, D) Tensor of positional embeddings.
-        """
+
         # https://github.com/openai/glide-text2im/blob/main/glide_text2im/nn.py
         half = dim // 2
-        freqs = torch.exp(
-            -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half
-        ).to(device=t.device)
+        freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(device=t.device)
         args = t[:, None].float() * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+
         if dim % 2:
             embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+
         return embedding
 
     def forward(self, t):
@@ -66,9 +172,8 @@ class TimestepEmbedder(nn.Module):
 
 
 class LabelEmbedder(nn.Module):
-    """
-    Embeds class labels into vector representations. Also handles label dropout for classifier-free guidance.
-    """
+    """Embeds class labels into vector representations. Also handles label dropout for classifier-free guidance."""
+
     def __init__(self, num_classes, hidden_size, dropout_prob):
         super().__init__()
         use_cfg_embedding = dropout_prob > 0
@@ -76,10 +181,12 @@ class LabelEmbedder(nn.Module):
         self.num_classes = num_classes
         self.dropout_prob = dropout_prob
 
+        # Init table
+        nn.init.kaiming_uniform_(self.embedding_table.weight)
+
     def token_drop(self, labels, force_drop_ids=None):
-        """
-        Drops labels to enable classifier-free guidance.
-        """
+        """Drops labels to enable classifier-free guidance."""
+
         if force_drop_ids is None:
             drop_ids = torch.rand(labels.shape[0], device=labels.device) < self.dropout_prob
         else:
@@ -95,140 +202,116 @@ class LabelEmbedder(nn.Module):
         return embeddings
 
 
-#################################################################################
-#                                 Core DiT Model                                #
-#################################################################################
-
 class DiTBlock(nn.Module):
-    """
-    A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning.
-    """
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
+    """A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning."""
+
+    def __init__(
+        self,
+        hidden_size: int,
+        num_heads: int,
+        mlp_ratio: float=4.0,
+        use_cosine_attention: bool=False,
+    ):
         super().__init__()
+
+        # TODO: Flag for disabling layer norm
+
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
+        self.attn = Attention(hidden_size, num_heads, use_cosine_attention=use_cosine_attention)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        mlp_hidden_dim = int(hidden_size * mlp_ratio)
-        approx_gelu = lambda: nn.GELU(approximate="tanh")
-        self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=0)
-        self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(hidden_size, 6 * hidden_size, bias=True)
-        )
+        self.mlp = MLP(hidden_size, hidden_size, mlp_ratio)
+        self.modulation = AdaLNModulation(hidden_size, 3)
 
     def forward(self, x, c):
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
         x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
         return x
 
 
 class FinalLayer(nn.Module):
-    """
-    The final layer of DiT.
-    """
+    """The final layer of DiT."""
+
     def __init__(self, hidden_size, patch_size, out_channels):
         super().__init__()
+
         self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.linear = nn.Linear(hidden_size, patch_size * patch_size * out_channels, bias=True)
-        self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(hidden_size, 2 * hidden_size, bias=True)
-        )
+        self.linear = SimpleLinear(hidden_size, patch_size * patch_size * out_channels)
+        self.modulation = AdaLNModulation(hidden_size, 1)
+
+        nn.init.zeros_(self.linear.linear.weight)
 
     def forward(self, x, c):
-        shift, scale = self.adaLN_modulation(c).chunk(2, dim=1)
+        shift, scale = self.modulation(c)
         x = modulate(self.norm_final(x), shift, scale)
         x = self.linear(x)
         return x
 
 
 class DiT(nn.Module):
-    """
-    Diffusion model with a Transformer backbone.
-    """
+    """Diffusion model with a Transformer backbone."""
+
     def __init__(
         self,
-        input_size=32,
-        patch_size=2,
-        in_channels=3,
-        hidden_size=1152,
-        depth=28,
-        num_heads=16,
-        mlp_ratio=4.0,
-        class_dropout_prob=0.1,
-        num_classes=1000,
-        learn_sigma=True,
+        depth: int,
+        hidden_size: int,
+        patch_size: int,
+        input_size: int=32,
+        in_channels: int=3,
+        num_heads: int=16,
+        mlp_ratio: float=4.0,
+        class_dropout_prob: float=0.1,
+        num_classes: int=1000,
+        learn_sigma: bool=True,
+        use_cosine_attention: bool=False,
+        use_weight_normalization: bool=False,
+        use_no_layernorm: bool=False,
     ):
         super().__init__()
+
+        if use_weight_normalization:
+            raise NotImplementedError
+
+        if use_no_layernorm:
+            raise NotImplementedError
+
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
         self.out_channels = in_channels * 2 if learn_sigma else in_channels
         self.patch_size = patch_size
         self.num_heads = num_heads
 
-        self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
+        self.x_embedder = PatchEmbedder(patch_size, in_channels, hidden_size)
         self.t_embedder = TimestepEmbedder(hidden_size)
         self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
-        num_patches = self.x_embedder.num_patches
-        # Will use fixed sin-cos embedding:
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
+
+        self.pos_embed = nn.Parameter(
+            torch.from_numpy(get_2d_sincos_pos_embed(hidden_size, input_size // patch_size)).float().unsqueeze(0),
+            requires_grad=False,
+        )
 
         self.blocks = nn.ModuleList([
-            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
+            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, use_cosine_attention=use_cosine_attention) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
-        self.initialize_weights()
-
-    def initialize_weights(self):
-        # Initialize transformer layers:
-        def _basic_init(module):
-            if isinstance(module, nn.Linear):
-                torch.nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.constant_(module.bias, 0)
-        self.apply(_basic_init)
-
-        # Initialize (and freeze) pos_embed by sin-cos embedding:
-        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.x_embedder.num_patches ** 0.5))
-        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
-
-        # Initialize patch_embed like nn.Linear (instead of nn.Conv2d):
-        w = self.x_embedder.proj.weight.data
-        nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
-        nn.init.constant_(self.x_embedder.proj.bias, 0)
-
-        # Initialize label embedding table:
-        nn.init.normal_(self.y_embedder.embedding_table.weight, std=0.02)
-
-        # Initialize timestep embedding MLP:
-        nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
-        nn.init.normal_(self.t_embedder.mlp[2].weight, std=0.02)
-
-        # Zero-out adaLN modulation layers in DiT blocks:
-        for block in self.blocks:
-            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
-
-        # Zero-out output layers:
-        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
-        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
-        nn.init.constant_(self.final_layer.linear.weight, 0)
-        nn.init.constant_(self.final_layer.linear.bias, 0)
 
     def unpatchify(self, x):
         """
-        x: (N, T, patch_size**2 * C)
-        imgs: (N, H, W, C)
+        Args:
+            x: (N, T, patch_size**2 * C)
+
+        Returns: (N, H, W, C)
         """
+
         c = self.out_channels
-        p = self.x_embedder.patch_size[0]
+        p = self.patch_size
         h = w = int(x.shape[1] ** 0.5)
+
         assert h * w == x.shape[1]
 
-        x = x.reshape(shape=(x.shape[0], h, w, p, p, c))
-        x = torch.einsum("nhwpqc->nchpwq", x)
-        imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
+        x = x.reshape(-1, h, w, p, p, c)
+        x = x.permute(0, 5, 1, 3, 2, 4)
+        imgs = x.reshape(-1, c, h * p, w * p)
         return imgs
     
     def ckpt_wrapper(self, module):
@@ -239,51 +322,49 @@ class DiT(nn.Module):
 
     def forward(self, x, t, y):
         """
-        Forward pass of DiT.
-        x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
-        t: (N,) tensor of diffusion timesteps
-        y: (N,) tensor of class labels
+        Args:
+            x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
+            t: (N,) tensor of diffusion timesteps
+            y: (N,) tensor of class labels
+
+        Returns: (N, C, H, W)
         """
-        x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
-        t = self.t_embedder(t)                   # (N, D)
-        y = self.y_embedder(y, self.training)    # (N, D)
-        c = t + y                                # (N, D)
+
+        x = self.x_embedder(x) + self.pos_embed                                 # (N, T, D), where T = H * W / patch_size ** 2
+        t = self.t_embedder(t)                                                  # (N, D)
+        y = self.y_embedder(y, self.training)                                   # (N, D)
+        c = t + y                                                               # (N, D)
+
         for block in self.blocks:
-            x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)       # (N, T, D)
-        x = self.final_layer(x, c)               # (N, T, patch_size ** 2 * out_channels)
-        x = self.unpatchify(x)                   # (N, out_channels, H, W)
+            x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)  # (N, T, D)
+
+        x = self.final_layer(x, c)                                              # (N, T, patch_size ** 2 * out_channels)
+        x = self.unpatchify(x)                                                  # (N, out_channels, H, W)
         return x
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
-        """
-        Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance.
-        """
+        """Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance."""
+
         # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
         half = x[: len(x) // 2]
         combined = torch.cat([half, half], dim=0)
         model_out = self.forward(combined, t, y)
-        # For exact reproducibility reasons, we apply classifier-free guidance on only
-        # three channels by default. The standard approach to cfg applies it to all channels.
-        # This can be done by uncommenting the following line and commenting-out the line following that.
-        # eps, rest = model_out[:, :self.in_channels], model_out[:, self.in_channels:]
-        eps, rest = model_out[:, :3], model_out[:, 3:]
+        eps, rest = model_out[:, :self.in_channels], model_out[:, self.in_channels:]
         cond_eps, uncond_eps = torch.split(eps, len(eps) // 2, dim=0)
         half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
         eps = torch.cat([half_eps, half_eps], dim=0)
         return torch.cat([eps, rest], dim=1)
 
 
-#################################################################################
-#                   Sine/Cosine Positional Embedding Functions                  #
-#################################################################################
-# https://github.com/facebookresearch/mae/blob/main/util/pos_embed.py
-
 def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=0):
+    """Source: https://github.com/facebookresearch/mae/blob/main/util/pos_embed.py
+
+    Args:
+        grid_size: int of the grid height and width
+
+    Returns: (grid_size*grid_size, embed_dim) or (1+grid_size*grid_size, embed_dim) (w/ or w/o cls_token)
     """
-    grid_size: int of the grid height and width
-    return:
-    pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
-    """
+
     grid_h = np.arange(grid_size, dtype=np.float32)
     grid_w = np.arange(grid_size, dtype=np.float32)
     grid = np.meshgrid(grid_w, grid_h)  # here w goes first
@@ -297,6 +378,8 @@ def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=
 
 
 def get_2d_sincos_pos_embed_from_grid(embed_dim, grid):
+    """Source: https://github.com/facebookresearch/mae/blob/main/util/pos_embed.py"""
+
     assert embed_dim % 2 == 0
 
     # use half of dimensions to encode grid_h
@@ -308,11 +391,15 @@ def get_2d_sincos_pos_embed_from_grid(embed_dim, grid):
 
 
 def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
+    """Source: https://github.com/facebookresearch/mae/blob/main/util/pos_embed.py
+
+    Args:
+        embed_dim: output dimension for each position (D)
+        pos: (M,)
+
+    Returns: (M, D)
     """
-    embed_dim: output dimension for each position
-    pos: a list of positions to be encoded: size (M,)
-    out: (M, D)
-    """
+
     assert embed_dim % 2 == 0
     omega = np.arange(embed_dim // 2, dtype=np.float64)
     omega /= embed_dim / 2.
@@ -327,10 +414,6 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
     emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
     return emb
 
-
-#################################################################################
-#                                   DiT Configs                                  #
-#################################################################################
 
 def DiT_XL_2(**kwargs):
     return DiT(depth=28, hidden_size=1152, patch_size=2, num_heads=16, **kwargs)

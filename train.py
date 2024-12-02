@@ -72,7 +72,13 @@ def main(args):
     # Setup diffusion process
     diffusion = create_diffusion(timestep_respacing="")
 
-    model = DiT_models[args.model](input_size=dataset.data_size, num_classes=args.num_classes).to(device)
+    model = DiT_models[args.model](
+        input_size=dataset.data_size,
+        num_classes=args.num_classes,
+        use_cosine_attention=args.use_cosine_attention,
+        use_weight_normalization=args.use_weight_normalization,
+        use_no_layernorm=args.use_no_layernorm,
+    ).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
@@ -194,6 +200,8 @@ def bytes_to_gb(n):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+
+    # Standard
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, required=True)
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XS/2")
@@ -205,5 +213,13 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
+
+    # Flags
+    parser.add_argument("--use-cosine-attention", action="store_true")
+    parser.add_argument("--use-weight-normalization", action="store_true")
+    parser.add_argument("--use-forced-weight-normalization", action="store_true")
+    parser.add_argument("--use-no-layernorm", action="store_true")
+    parser.add_argument("--use-post-hoc-ema", action="store_true")
+
     args = parser.parse_args()
     main(args)
