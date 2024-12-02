@@ -1,272 +1,207 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
-"""
-A minimal training script for DiT.
-"""
 import torch
-# the first flag below was False when we tested this script but True makes A100 training a lot faster:
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.data.distributed import DistributedSampler
 from torchvision import transforms
-import numpy as np
 from collections import OrderedDict
-from PIL import Image
 from copy import deepcopy
 from glob import glob
 from time import time
+import yaml
 import argparse
 import logging
 import os
-from accelerate import Accelerator
 
 from models import DiT_models
 from diffusion import create_diffusion
-from diffusers.models import AutoencoderKL
 
 
-#################################################################################
-#                             Training Helper Functions                         #
-#################################################################################
+class CustomDataset(Dataset):
+    def __init__(self, data_path: str):
+        self.features = torch.load(os.path.join(data_path, "features.pt"), weights_only=True)
+        self.labels = torch.load(os.path.join(data_path, "labels.pt"), weights_only=True)
 
-@torch.no_grad()
-def update_ema(ema_model, model, decay=0.9999):
-    """
-    Step the EMA model towards the current model.
-    """
-    ema_params = OrderedDict(ema_model.named_parameters())
-    model_params = OrderedDict(model.named_parameters())
+        if self.features.dtype == torch.uint8:
+            self.transform = transforms.Compose([
+                transforms.RandomHorizontalFlip(),
+                transforms.ConvertImageDtype(torch.float32),
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5], inplace=True)
+            ])
+        else:
+            self.transform = None
 
-    for name, param in model_params.items():
-        name = name.replace("module.", "")
-        # TODO: Consider applying only to params that require_grad to avoid small numerical changes of pos_embed
-        ema_params[name].mul_(decay).add_(param.data, alpha=1 - decay)
+        assert self.features.shape[0] == self.labels.shape[0]
+        assert self.features.shape[2] == self.features.shape[3]
 
+    @property
+    def data_size(self):
+        return self.features.shape[2]
 
-def requires_grad(model, flag=True):
-    """
-    Set requires_grad flag for all parameters in a model.
-    """
-    for p in model.parameters():
-        p.requires_grad = flag
-
-
-def create_logger(logging_dir):
-    """
-    Create a logger that writes to a log file and stdout.
-    """
-    logging.basicConfig(
-        level=logging.INFO,
-        format='[\033[34m%(asctime)s\033[0m] %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        handlers=[logging.StreamHandler(), logging.FileHandler(f"{logging_dir}/log.txt")]
-    )
-    logger = logging.getLogger(__name__)
-    return logger
-
-
-def center_crop_arr(pil_image, image_size):
-    """
-    Center cropping implementation from ADM.
-    https://github.com/openai/guided-diffusion/blob/8fb3ad9197f16bbc40620447b2742e13458d2831/guided_diffusion/image_datasets.py#L126
-    """
-    while min(*pil_image.size) >= 2 * image_size:
-        pil_image = pil_image.resize(
-            tuple(x // 2 for x in pil_image.size), resample=Image.BOX
-        )
-
-    scale = image_size / min(*pil_image.size)
-    pil_image = pil_image.resize(
-        tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC
-    )
-
-    arr = np.array(pil_image)
-    crop_y = (arr.shape[0] - image_size) // 2
-    crop_x = (arr.shape[1] - image_size) // 2
-    return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
-
-
-class ImageNet32(Dataset):
-    def __init__(self, features_dir, transform=None):
-        self.transform = transform
-
-        data, labels = [], []
-        for file in sorted(os.listdir(features_dir)):
-            batch = np.load(os.path.join(features_dir, file))
-            
-            data.append(batch["data"])
-            labels.append(batch["labels"])
-            break #FIXME: remove this line 
-        
-        self.images = torch.from_numpy(np.concatenate(data)).reshape(-1, 3, 32, 32).byte()
-        self.labels = torch.from_numpy(np.concatenate(labels)) - 1 # 1-indexed to 0-indexed
-
-        assert self.images.size(0) == self.labels.size(0), 'Data and labels do not match'
+    @property
+    def channels(self):
+        return self.features.shape[1]
 
     def __len__(self):
-        return len(self.images)
+        return self.features.shape[0]
 
     def __getitem__(self, idx):
-        img = self.images[idx] / 255
-        labels = self.labels[idx]
+        feature = self.features[idx]
 
-        if self.transform:
-            img = self.transform(img)
+        if self.transform is not None:
+            feature = self.transform(feature)
 
-        return img, labels
+        return feature, self.labels[idx]
 
-#################################################################################
-#                                  Training Loop                                #
-#################################################################################
 
 def main(args):
-    """
-    Trains a new DiT model.
-    """
-    #FIXME: Undo comment, add back in when training on GPU
-    # assert torch.cuda.is_available(), "Training currently requires at least one GPU."
+    torch.manual_seed(args.seed)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Setup accelerator:
-    accelerator = Accelerator()
-    device = accelerator.device
+    # Setup experiment directory
+    exp_dir = setup_experiment(args.model, args.results_dir)
+    logger = create_logger(exp_dir, verbose=args.verbose)
+    logger.info(f"experiment directory created at {exp_dir}")
 
-    # Setup an experiment folder:
-    if accelerator.is_main_process:
-        os.makedirs(args.results_dir, exist_ok=True)  # Make results folder (holds all experiment subfolders)
-        experiment_index = len(glob(f"{args.results_dir}/*"))
-        model_string_name = args.model.replace("/", "-")  # e.g., DiT-XL/2 --> DiT-XL-2 (for naming folders)
-        experiment_dir = f"{args.results_dir}/{experiment_index:03d}-{model_string_name}"  # Create an experiment folder
-        checkpoint_dir = f"{experiment_dir}/checkpoints"  # Stores saved model checkpoints
-        os.makedirs(checkpoint_dir, exist_ok=True)
-        logger = create_logger(experiment_dir)
-        logger.info(f"Experiment directory created at {experiment_dir}")
+    # Save arguments
+    with open(os.path.join(exp_dir, "config.yaml"), "w") as f:
+        yaml.dump(vars(args), f)
 
-    # Create model:
-    model = DiT_models[args.model](
-        input_size=3*32*32,
-        num_classes=args.num_classes
-    )
+    # Setup data
+    dataset = CustomDataset(args.data_path)
+    loader = DataLoader(dataset, batch_size=int(args.batch_size), num_workers=args.num_workers, shuffle=True, pin_memory=True, drop_last=True)
+    logger.info(f"dataset contains {len(dataset):,} data points ({args.data_path}, {dataset.channels}x{dataset.data_size}x{dataset.data_size})")
 
-    # Note that parameter initialization is done within the DiT constructor
-    model = model.to(device)
-    ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
-    requires_grad(ema, False)
+    # Setup diffusion process
+    diffusion = create_diffusion(timestep_respacing="")
 
-    # TODO: REMOVE VAE DEPENDENCY
-    diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
-    
-    if accelerator.is_main_process:
-        logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
-
-    # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
+    model = DiT_models[args.model](input_size=dataset.data_size, num_classes=args.num_classes).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
+    logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
-    # Setup data:
-    transform = transforms.Compose([
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
-        transforms.RandomHorizontalFlip(),
-    ])
-    dataset = ImageNet32(args.feature_path, transform=transform)
-    loader = DataLoader(
-            dataset,
-            batch_size=int(args.global_batch_size // accelerator.num_processes),
-            shuffle=True,
-            num_workers=args.num_workers,
-            pin_memory=True,
-            drop_last=True
-        )
-    
-    if accelerator.is_main_process:
-        logger.info(f"Dataset contains {len(dataset):,} images ({args.feature_path})")
+    # Exponential moving average
+    ema = deepcopy(model).to(device)
+    requires_grad(ema, False)
+    update_ema(ema, model, decay=0)
 
-    # Prepare models for training:
-    update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
-    model.train()  # important! This enables embedding dropout for classifier-free guidance
-    ema.eval()  # EMA model should always be in eval mode
-    model, opt, loader = accelerator.prepare(model, opt, loader)
+    # Important! (This enables embedding dropout for CFG)
+    model.train()
+    ema.eval()
 
-    # Variables for monitoring/logging purposes:
+    # Variables for monitoring/logging purposes
     train_steps = 0
     log_steps = 0
     running_loss = 0
     start_time = time()
     
-    if accelerator.is_main_process:
-        logger.info(f"Training for {args.epochs} epochs...")
+    logger.info(f"training for {args.epochs} epochs...")
+
     for epoch in range(args.epochs):
-        if accelerator.is_main_process:
-            logger.info(f"Beginning epoch {epoch}...")
+        logger.info(f"beginning epoch {epoch}...")
+
         for x, y in loader:
             x = x.to(device)
             y = y.to(device)
-            x = x.squeeze(dim=1)
-            y = y.squeeze(dim=1)
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y)
+
             loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
             loss = loss_dict["loss"].mean()
             opt.zero_grad()
-            accelerator.backward(loss)
+            loss.backward()
             opt.step()
             update_ema(ema, model)
 
-            # Log loss values:
+            # Log loss values
             running_loss += loss.item()
             log_steps += 1
             train_steps += 1
             if train_steps % args.log_every == 0:
-                # Measure training speed:
-                torch.cuda.synchronize()
+                # Measure training speed
                 end_time = time()
                 steps_per_sec = log_steps / (end_time - start_time)
-                # Reduce loss history over all processes:
+
+                # Compute average loss
                 avg_loss = torch.tensor(running_loss / log_steps, device=device)
-                avg_loss = avg_loss.item() / accelerator.num_processes
-                if accelerator.is_main_process:
-                    logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
-                # Reset monitoring variables:
+                avg_loss = avg_loss.item()
+                logger.info(f"(step={train_steps:07d}) train Loss: {avg_loss:.4f}, train steps/sec: {steps_per_sec:.2f}")
+                logger.debug(f"(memory) current={bytes_to_gb(torch.cuda.memory_allocated()):.2f}GB, max={bytes_to_gb(torch.cuda.max_memory_allocated()):.2f}GB")
+
+                # Reset monitoring variables
                 running_loss = 0
                 log_steps = 0
                 start_time = time()
 
-            # Save DiT checkpoint:
+            # Save checkpoint
             if train_steps % args.ckpt_every == 0 and train_steps > 0:
-                if accelerator.is_main_process:
-                    checkpoint = {
-                        "model": model.module.state_dict(),
-                        "ema": ema.state_dict(),
-                        "opt": opt.state_dict(),
-                        "args": args
-                    }
-                    checkpoint_path = f"{checkpoint_dir}/{train_steps:07d}.pt"
-                    torch.save(checkpoint, checkpoint_path)
-                    logger.info(f"Saved checkpoint to {checkpoint_path}")
-
-    model.eval()  # important! This disables randomized embedding dropout
-    # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
+                checkpoint = {
+                    "model": model.state_dict(),
+                    "ema": ema.state_dict(),
+                    "opt": opt.state_dict(),
+                }
+                checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
+                torch.save(checkpoint, checkpoint_path)
+                logger.info(f"saved checkpoint to {checkpoint_path}")
     
-    if accelerator.is_main_process:
-        logger.info("Done!")
+    logger.info("done!")
+
+
+def setup_experiment(model_name, results_dir):
+    """Create an experiment directory for the current run."""
+
+    # Make results directory
+    os.makedirs(results_dir, exist_ok=True)
+
+    experiment_index = len(glob(os.path.join(results_dir, "*")))
+    model_string_name = model_name.replace("/", "-")
+    experiment_dir = os.path.join(results_dir, f"{experiment_index:03d}-{model_string_name}")
+    checkpoint_dir = os.path.join(experiment_dir, "checkpoints")
+
+    # Make experiment directory
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    return experiment_dir
+
+
+@torch.no_grad()
+def update_ema(ema_model, model, decay=0.9999):
+    ema_params = OrderedDict(ema_model.named_parameters())
+    model_params = OrderedDict(model.named_parameters())
+
+    for name, param in model_params.items():
+        name = name.replace("module.", "")
+        ema_params[name].mul_(decay).add_(param.data, alpha=1-decay)
+
+
+def requires_grad(model, flag=True):
+    for p in model.parameters():
+        p.requires_grad = flag
+
+
+def create_logger(logging_dir, verbose: int=1):
+    verbose_map = {0: logging.WARNING, 1: logging.INFO, 2: logging.DEBUG}
+
+    logging.basicConfig(
+        level=verbose_map.get(verbose, logging.INFO),
+        format="[\033[34m%(asctime)s\033[0m] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[logging.StreamHandler(), logging.FileHandler(os.path.join(logging_dir, "log.txt"))]
+    )
+    logger = logging.getLogger(__name__)
+    return logger
+
+
+def bytes_to_gb(n):
+    return n * 1e-9
 
 
 if __name__ == "__main__":
-    # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
-    parser.add_argument("--feature-path", type=str, default="features")
-    parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
-    parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
+    parser.add_argument("--data-path", type=str, required=True)
+    parser.add_argument("--results-dir", type=str, required=True)
+    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XS/2")
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=1400)
-    parser.add_argument("--global-batch-size", type=int, default=256)
-    parser.add_argument("--global-seed", type=int, default=0)
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--verbose", type=int, help="0: warning, 1: info, 2: debug", choices=[0, 1, 2], default=1)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)

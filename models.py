@@ -11,6 +11,7 @@
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 import numpy as np
 import math
 from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
@@ -150,7 +151,7 @@ class DiT(nn.Module):
         self,
         input_size=32,
         patch_size=2,
-        in_channels=4,
+        in_channels=3,
         hidden_size=1152,
         depth=28,
         num_heads=16,
@@ -226,7 +227,7 @@ class DiT(nn.Module):
         assert h * w == x.shape[1]
 
         x = x.reshape(shape=(x.shape[0], h, w, p, p, c))
-        x = torch.einsum('nhwpqc->nchpwq', x)
+        x = torch.einsum("nhwpqc->nchpwq", x)
         imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
         return imgs
     
@@ -248,8 +249,8 @@ class DiT(nn.Module):
         y = self.y_embedder(y, self.training)    # (N, D)
         c = t + y                                # (N, D)
         for block in self.blocks:
-            x = torch.utils.checkpoint.checkpoint(self.ckpt_wrapper(block), x, c)       # (N, T, D)
-        x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
+            x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)       # (N, T, D)
+        x = self.final_layer(x, c)               # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)                   # (N, out_channels, H, W)
         return x
 
@@ -318,7 +319,7 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
     omega = 1. / 10000**omega  # (D/2,)
 
     pos = pos.reshape(-1)  # (M,)
-    out = np.einsum('m,d->md', pos, omega)  # (M, D/2), outer product
+    out = np.einsum("m,d->md", pos, omega)  # (M, D/2), outer product
 
     emb_sin = np.sin(out) # (M, D/2)
     emb_cos = np.cos(out) # (M, D/2)
@@ -367,10 +368,20 @@ def DiT_S_4(**kwargs):
 def DiT_S_8(**kwargs):
     return DiT(depth=12, hidden_size=384, patch_size=8, num_heads=6, **kwargs)
 
+def DiT_XS_2(**kwargs):
+    return DiT(depth=6, hidden_size=256, patch_size=2, num_heads=4, **kwargs)
+
+def DiT_XS_4(**kwargs):
+    return DiT(depth=6, hidden_size=256, patch_size=4, num_heads=4, **kwargs)
+
+def DiT_XS_8(**kwargs):
+    return DiT(depth=6, hidden_size=256, patch_size=8, num_heads=4, **kwargs)
+
 
 DiT_models = {
-    'DiT-XL/2': DiT_XL_2,  'DiT-XL/4': DiT_XL_4,  'DiT-XL/8': DiT_XL_8,
-    'DiT-L/2':  DiT_L_2,   'DiT-L/4':  DiT_L_4,   'DiT-L/8':  DiT_L_8,
-    'DiT-B/2':  DiT_B_2,   'DiT-B/4':  DiT_B_4,   'DiT-B/8':  DiT_B_8,
-    'DiT-S/2':  DiT_S_2,   'DiT-S/4':  DiT_S_4,   'DiT-S/8':  DiT_S_8,
+    "DiT-XL/2": DiT_XL_2,  "DiT-XL/4": DiT_XL_4,  "DiT-XL/8": DiT_XL_8,
+    "DiT-L/2":  DiT_L_2,   "DiT-L/4":  DiT_L_4,   "DiT-L/8":  DiT_L_8,
+    "DiT-B/2":  DiT_B_2,   "DiT-B/4":  DiT_B_4,   "DiT-B/8":  DiT_B_8,
+    "DiT-S/2":  DiT_S_2,   "DiT-S/4":  DiT_S_4,   "DiT-S/8":  DiT_S_8,
+    "DiT-XS/2":  DiT_XS_2,   "DiT-XS/4":  DiT_XS_4,   "DiT-XS/8":  DiT_XS_8,
 }
