@@ -10,13 +10,42 @@ def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
 
-class SimpleLinear(nn.Module):
-    def __init__(self, in_dim: int, out_dim: int):
+def normalize(x, eps=1e-4):
+    # Dividing by norm makes the std of the weights equal to 1/sqrt(in_dim), so we
+    # multiply by sqrt(in_dim) to compensate (TODO: Add derivation to appendix)
+    x_norm = torch.linalg.vector_norm(x, dim=-1, keepdim=True)
+    x_norm = torch.add(eps, x_norm, alpha=math.sqrt(1.0 / x.shape[-1]))
+    return x.div(x_norm)
+
+
+class MPLinear(nn.Module):
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        zero_init: bool=False,
+        use_wn: bool=False,
+        learn_gain: bool=False,
+        use_forced_wn: bool=False,
+    ):
         super().__init__()
 
-        self.linear = nn.Linear(in_dim+1, out_dim, bias=False)
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.use_wn = use_wn
+        self.use_forced_wn = use_forced_wn
 
-        nn.init.kaiming_uniform_(self.linear.weight)
+        self.weight = nn.Parameter(torch.empty(out_dim, in_dim+1))
+
+        if use_wn:
+            self.gain = nn.Parameter(torch.tensor(1.), requires_grad=learn_gain)
+
+        if use_forced_wn:
+            nn.init.normal_(self.weight)
+        elif zero_init:
+            nn.init.zeros_(self.weight)
+        else:
+            nn.init.kaiming_uniform_(self.weight)
 
     def forward(self, x):
         """
@@ -26,30 +55,108 @@ class SimpleLinear(nn.Module):
         Returns: (...B, out_dim)
         """
 
-        # Concatenate 1s to input
+        # Forced weight normalization
+        w = self.weight.to(torch.float32)
+        if self.training and self.use_forced_wn:
+            with torch.no_grad():
+                self.weight.copy_(normalize(w))
+
+        # Traditional weight normalization
+        if self.use_wn:
+            w = normalize(w)
+            w = w * (self.gain / math.sqrt(self.in_dim + 1))
+
+        w = w.to(x.dtype)
+
+        # Concatenate 1 to input for bias
         x = torch.cat([x, torch.ones(*x.shape[:-1], 1).to(x.device)], dim=-1)
-        return self.linear(x)
+        return F.linear(x, w)
+
+
+class MPConv2d(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int=1,
+        padding: int=0,
+        zero_init: bool=False,
+        use_wn: bool=False,
+        learn_gain: bool=False,
+        use_forced_wn: bool=False,
+    ):
+        super().__init__()
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.use_wn = use_wn
+        self.use_forced_wn = use_forced_wn
+
+        self.weight = nn.Parameter(torch.empty(out_channels, in_channels+1, kernel_size, kernel_size))
+
+        if use_wn:
+            self.gain = nn.Parameter(torch.tensor(1.), requires_grad=learn_gain)
+
+        if use_forced_wn:
+            nn.init.normal_(self.weight)
+        elif zero_init:
+            nn.init.zeros_(self.weight)
+        else:
+            nn.init.kaiming_uniform_(self.weight)
+
+    def forward(self, x):
+        """
+        Args:
+            x: (...B, in_channels, H, W)
+        
+        Returns: (...B, out_channels, H', W')
+        """
+
+        # Forced weight normalization
+        w = self.weight.to(torch.float32)
+        if self.training and self.use_forced_wn:
+            with torch.no_grad():
+                self.weight.copy_(normalize(w))
+
+        # Traditional weight normalization
+        if self.use_wn:
+            w = normalize(w)
+            w = w * (self.gain / math.sqrt((self.in_channels + 1) * self.kernel_size * self.kernel_size))
+
+        w = w.to(x.dtype)
+
+        # Concatenate 1 to channels for bias
+        x = torch.cat([x, torch.ones(*x.shape[:-3], 1, *x.shape[-2:]).to(x.device)], dim=-3)
+        return F.conv2d(x, w, stride=self.stride, padding=self.padding)
 
 
 class AdaLNModulation(nn.Module):
-    def __init__(self, hidden_dim: int, num_modulates: int):
+    def __init__(self, hidden_dim: int, num_modulates: int, use_wn: bool=False, use_forced_wn: bool=False):
         super().__init__()
 
         self.num_modulates = num_modulates
         self.net = nn.Sequential(
             nn.SiLU(),
-            SimpleLinear(hidden_dim, 2 * num_modulates * hidden_dim),
+            MPLinear(
+                hidden_dim,
+                2 * num_modulates * hidden_dim,
+                zero_init=True,
+                use_wn=use_wn,
+                learn_gain=True,
+                use_forced_wn=use_forced_wn,
+            ),
         )
 
-        # Always init at zero
-        nn.init.zeros_(self.net[-1].linear.weight)
-    
     def forward(self, x):
         return self.net(x).chunk(2 * self.num_modulates, dim=1)
 
 
 class Attention(nn.Module):
-    def __init__(self, in_dim: int, num_heads: int, use_cosine_attention: bool=False):
+    def __init__(self, in_dim: int, num_heads: int, use_cosine_attention: bool=False, use_wn: bool=False, use_forced_wn: bool=False):
         super().__init__()
 
         assert in_dim % num_heads == 0
@@ -58,12 +165,10 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = in_dim // num_heads
 
-        self.qkv = SimpleLinear(in_dim, in_dim * 3)
-        self.out_proj = SimpleLinear(in_dim, in_dim)
+        self.qkv = MPLinear(in_dim, 3 * in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
+        self.out_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
 
         self.scale = 1.0 / math.sqrt(self.head_dim)
-        if self.use_cosine:
-            self.scale = math.sqrt(self.head_dim)
 
     def forward(self, x):
         """
@@ -82,25 +187,34 @@ class Attention(nn.Module):
         v = v.view(-1, T, self.num_heads, self.head_dim).transpose(-3, -2)  # (...B, H, T, D')
 
         if self.use_cosine:
-            q = F.normalize(q, dim=-1)
-            k = F.normalize(k, dim=-1)
+            q = normalize(q)
+            k = normalize(k)
+            v = normalize(v)
 
         attn = F.scaled_dot_product_attention(q, k, v, scale=self.scale)    # (...B, H, T, D')
         attn = attn.transpose(-3, -2)                                       # (...B, T, H, D')
-        attn = attn.reshape(*x.shape[:-2], T, D)                             # (...B, T, D)
+        attn = attn.reshape(*x.shape)                                       # (...B, T, D)
 
         return self.out_proj(attn)
 
 
 class MLP(nn.Module):
-    def __init__(self, in_dim: int, out_dim: int, mlp_ratio: float=4.0, hidden_dim: int=None):
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        mlp_ratio: float=4.0,
+        hidden_dim: int=None,
+        use_wn: bool=False,
+        use_forced_wn: bool=False,
+    ):
         super().__init__()
 
         self.hidden_dim = int(in_dim * mlp_ratio) if hidden_dim is None else hidden_dim
         self.net = nn.Sequential(
-            SimpleLinear(in_dim, self.hidden_dim),
-            nn.GELU(approximate="tanh"),
-            SimpleLinear(self.hidden_dim, out_dim),
+            MPLinear(in_dim, self.hidden_dim, use_wn=use_wn, use_forced_wn=use_forced_wn),
+            nn.SiLU(),
+            MPLinear(self.hidden_dim, out_dim, use_wn=use_wn, use_forced_wn=use_forced_wn),
         )
 
     def forward(self, x):
@@ -110,14 +224,17 @@ class MLP(nn.Module):
 class PatchEmbedder(nn.Module):
     """Embeds image patches."""
 
-    def __init__(self, patch_size: int, in_channels: int, hidden_size: int):
+    def __init__(self, patch_size: int, in_channels: int, hidden_size: int, use_wn: bool=False, use_forced_wn: bool=False):
         super().__init__()
 
-        self.proj = nn.Conv2d(in_channels, hidden_size, kernel_size=patch_size, stride=patch_size, bias=True)
-
-        # Initialize patch_embed like nn.Linear (instead of nn.Conv2d)
-        nn.init.kaiming_uniform_(self.proj.weight.data.view(hidden_size, -1))
-        nn.init.zeros_(self.proj.bias)
+        self.proj = MPConv2d(
+            in_channels,
+            hidden_size,
+            kernel_size=patch_size,
+            stride=patch_size,
+            use_wn=use_wn,
+            use_forced_wn=use_forced_wn,
+        )
 
     def forward(self, x):
         """
@@ -136,10 +253,22 @@ class PatchEmbedder(nn.Module):
 class TimestepEmbedder(nn.Module):
     """Embeds scalar timesteps into vector representations."""
 
-    def __init__(self, hidden_size, frequency_embedding_size=256):
+    def __init__(
+        self,
+        hidden_size: int,
+        frequency_embedding_size: int=256,
+        use_wn: bool=False,
+        use_forced_wn: bool=False,
+    ):
         super().__init__()
 
-        self.mlp = MLP(frequency_embedding_size, hidden_size, hidden_dim=hidden_size)
+        self.mlp = MLP(
+            frequency_embedding_size,
+            hidden_size,
+            hidden_dim=hidden_size,
+            use_wn=use_wn,
+            use_forced_wn=use_forced_wn,
+        )
         self.frequency_embedding_size = frequency_embedding_size
 
     @staticmethod
@@ -182,7 +311,7 @@ class LabelEmbedder(nn.Module):
         self.dropout_prob = dropout_prob
 
         # Init table
-        nn.init.kaiming_uniform_(self.embedding_table.weight)
+        nn.init.normal_(self.embedding_table.weight, std=0.02)
 
     def token_drop(self, labels, force_drop_ids=None):
         """Drops labels to enable classifier-free guidance."""
@@ -211,20 +340,24 @@ class DiTBlock(nn.Module):
         num_heads: int,
         mlp_ratio: float=4.0,
         use_cosine_attention: bool=False,
+        use_wn: bool=False,
+        use_forced_wn: bool=False,
     ):
         super().__init__()
 
         # TODO: Flag for disabling layer norm
 
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.attn = Attention(hidden_size, num_heads, use_cosine_attention=use_cosine_attention)
+        self.attn = Attention(hidden_size, num_heads, use_cosine_attention=use_cosine_attention, use_wn=use_wn, use_forced_wn=use_forced_wn)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.mlp = MLP(hidden_size, hidden_size, mlp_ratio)
-        self.modulation = AdaLNModulation(hidden_size, 3)
+        self.mlp = MLP(hidden_size, hidden_size, mlp_ratio, use_wn=use_wn, use_forced_wn=use_forced_wn)
+        self.modulation = AdaLNModulation(hidden_size, 3, use_wn=use_wn, use_forced_wn=use_forced_wn)
 
     def forward(self, x, c):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
-        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
+        x = modulate(self.norm1(x), shift_msa, scale_msa)
+        attn = self.attn(x)
+        x = x + gate_msa.unsqueeze(1) * attn
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
         return x
 
@@ -232,14 +365,26 @@ class DiTBlock(nn.Module):
 class FinalLayer(nn.Module):
     """The final layer of DiT."""
 
-    def __init__(self, hidden_size, patch_size, out_channels):
+    def __init__(
+        self,
+        hidden_size: int,
+        patch_size: int,
+        out_channels: int,
+        use_wn: bool=False,
+        use_forced_wn: bool=False,
+    ):
         super().__init__()
 
         self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.linear = SimpleLinear(hidden_size, patch_size * patch_size * out_channels)
-        self.modulation = AdaLNModulation(hidden_size, 1)
-
-        nn.init.zeros_(self.linear.linear.weight)
+        self.linear = MPLinear(
+            hidden_size,
+            patch_size * patch_size * out_channels,
+            zero_init=True,
+            use_wn=use_wn,
+            learn_gain=True,
+            use_forced_wn=use_forced_wn,
+        )
+        self.modulation = AdaLNModulation(hidden_size, 1, use_wn=use_wn, use_forced_wn=use_forced_wn)
 
     def forward(self, x, c):
         shift, scale = self.modulation(c)
@@ -265,12 +410,10 @@ class DiT(nn.Module):
         learn_sigma: bool=True,
         use_cosine_attention: bool=False,
         use_weight_normalization: bool=False,
+        use_forced_weight_normalization: bool=False,
         use_no_layernorm: bool=False,
     ):
         super().__init__()
-
-        if use_weight_normalization:
-            raise NotImplementedError
 
         if use_no_layernorm:
             raise NotImplementedError
@@ -281,7 +424,7 @@ class DiT(nn.Module):
         self.patch_size = patch_size
         self.num_heads = num_heads
 
-        self.x_embedder = PatchEmbedder(patch_size, in_channels, hidden_size)
+        self.x_embedder = PatchEmbedder(patch_size, in_channels, hidden_size, use_wn=use_weight_normalization, use_forced_wn=use_forced_weight_normalization)
         self.t_embedder = TimestepEmbedder(hidden_size)
         self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
 
@@ -291,9 +434,22 @@ class DiT(nn.Module):
         )
 
         self.blocks = nn.ModuleList([
-            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, use_cosine_attention=use_cosine_attention) for _ in range(depth)
+            DiTBlock(
+                hidden_size,
+                num_heads,
+                mlp_ratio=mlp_ratio,
+                use_cosine_attention=use_cosine_attention,
+                use_wn=use_weight_normalization,
+                use_forced_wn=use_forced_weight_normalization,
+            ) for _ in range(depth)
         ])
-        self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
+        self.final_layer = FinalLayer(
+            hidden_size,
+            patch_size,
+            self.out_channels,
+            use_wn=use_weight_normalization,
+            use_forced_wn=use_forced_weight_normalization,
+        )
 
     def unpatchify(self, x):
         """
@@ -336,7 +492,11 @@ class DiT(nn.Module):
         c = t + y                                                               # (N, D)
 
         for block in self.blocks:
+            # print(x.std(-1).mean().item())
             x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)  # (N, T, D)
+
+        # print(x.std(-1).mean().item())
+        # input()
 
         x = self.final_layer(x, c)                                              # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)                                                  # (N, out_channels, H, W)

@@ -77,9 +77,10 @@ def main(args):
         num_classes=args.num_classes,
         use_cosine_attention=args.use_cosine_attention,
         use_weight_normalization=args.use_weight_normalization,
+        use_forced_weight_normalization=args.use_forced_weight_normalization,
         use_no_layernorm=args.use_no_layernorm,
     ).to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
+    opt = torch.optim.Adam(model.parameters(), lr=1e-2, weight_decay=0)
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     # Exponential moving average
@@ -127,7 +128,7 @@ def main(args):
                 # Compute average loss
                 avg_loss = torch.tensor(running_loss / log_steps, device=device)
                 avg_loss = avg_loss.item()
-                logger.info(f"(step={train_steps:07d}) train Loss: {avg_loss:.4f}, train steps/sec: {steps_per_sec:.2f}")
+                logger.info(f"(step={train_steps:07d}) train loss: {avg_loss:.4f}, train steps/sec: {steps_per_sec:.2f}")
                 logger.debug(f"(memory) current={bytes_to_gb(torch.cuda.memory_allocated()):.2f}GB, max={bytes_to_gb(torch.cuda.max_memory_allocated()):.2f}GB")
 
                 # Reset monitoring variables
@@ -218,8 +219,8 @@ if __name__ == "__main__":
     parser.add_argument("--use-cosine-attention", action="store_true")
     parser.add_argument("--use-weight-normalization", action="store_true")
     parser.add_argument("--use-forced-weight-normalization", action="store_true")
-    parser.add_argument("--use-no-layernorm", action="store_true")
-    parser.add_argument("--use-post-hoc-ema", action="store_true")
+    parser.add_argument("--use-mp-residual", action="store_true")
+    parser.add_argument("--use-mp-silu", action="store_true")
 
     args = parser.parse_args()
     main(args)
