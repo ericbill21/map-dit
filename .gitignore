@@ -58,3 +58,4 @@ Temporary Items
 slurm/
 notebooks/
 __pycache__/
+test_mp.py

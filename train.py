@@ -10,45 +10,11 @@ import argparse
 import logging
 import os
 
-from models import DiT_models
+from src.models import DIT_MODELS
 from diffusion import create_diffusion
 
 
-class CustomDataset(Dataset):
-    def __init__(self, data_path: str):
-        self.features = torch.load(os.path.join(data_path, "features.pt"), weights_only=True)
-        self.labels = torch.load(os.path.join(data_path, "labels.pt"), weights_only=True)
-
-        if self.features.dtype == torch.uint8:
-            self.transform = transforms.Compose([
-                transforms.RandomHorizontalFlip(),
-                transforms.ConvertImageDtype(torch.float32),
-                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5], inplace=True)
-            ])
-        else:
-            self.transform = None
-
-        assert self.features.shape[0] == self.labels.shape[0]
-        assert self.features.shape[2] == self.features.shape[3]
-
-    @property
-    def data_size(self):
-        return self.features.shape[2]
-
-    @property
-    def channels(self):
-        return self.features.shape[1]
-
-    def __len__(self):
-        return self.features.shape[0]
-
-    def __getitem__(self, idx):
-        feature = self.features[idx]
-
-        if self.transform is not None:
-            feature = self.transform(feature)
-
-        return feature, self.labels[idx]
+torch.set_float32_matmul_precision("high")
 
 
 def main(args):
@@ -58,6 +24,8 @@ def main(args):
     # Setup experiment directory
     exp_dir = setup_experiment(args.model, args.results_dir)
     logger = create_logger(exp_dir, verbose=args.verbose)
+    logger.info(f"using device {device}")
+
     logger.info(f"experiment directory created at {exp_dir}")
 
     # Save arguments
@@ -72,15 +40,20 @@ def main(args):
     # Setup diffusion process
     diffusion = create_diffusion(timestep_respacing="")
 
-    model = DiT_models[args.model](
+    model = DIT_MODELS[args.model](
         input_size=dataset.data_size,
         num_classes=args.num_classes,
         use_cosine_attention=args.use_cosine_attention,
+        use_mp_attention=args.use_mp_attention,
         use_weight_normalization=args.use_weight_normalization,
         use_forced_weight_normalization=args.use_forced_weight_normalization,
+        use_mp_residual=args.use_mp_residual,
+        use_mp_silu=args.use_mp_silu,
         use_no_layernorm=args.use_no_layernorm,
+        use_mp_pos_enc=args.use_mp_pos_enc,
     ).to(device)
-    opt = torch.optim.Adam(model.parameters(), lr=1e-2, weight_decay=0)
+    model = torch.compile(model, mode="reduce-overhead", fullgraph=True, disable=args.disable_compile)
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     # Exponential moving average
@@ -150,6 +123,43 @@ def main(args):
     logger.info("done!")
 
 
+class CustomDataset(Dataset):
+    def __init__(self, data_path: str):
+        self.features = torch.load(os.path.join(data_path, "features.pt"), weights_only=True)
+        self.labels = torch.load(os.path.join(data_path, "labels.pt"), weights_only=True)
+
+        if self.features.dtype == torch.uint8:
+            self.transform = transforms.Compose([
+                transforms.RandomHorizontalFlip(),
+                transforms.ConvertImageDtype(torch.float32),
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5], inplace=True)
+            ])
+        else:
+            self.transform = None
+
+        assert self.features.shape[0] == self.labels.shape[0]
+        assert self.features.shape[2] == self.features.shape[3]
+
+    @property
+    def data_size(self):
+        return self.features.shape[2]
+
+    @property
+    def channels(self):
+        return self.features.shape[1]
+
+    def __len__(self):
+        return self.features.shape[0]
+
+    def __getitem__(self, idx):
+        feature = self.features[idx]
+
+        if self.transform is not None:
+            feature = self.transform(feature)
+
+        return feature, self.labels[idx]
+
+
 def setup_experiment(model_name, results_dir):
     """Create an experiment directory for the current run."""
 
@@ -205,22 +215,27 @@ if __name__ == "__main__":
     # Standard
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, required=True)
-    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XS/2")
+    parser.add_argument("--model", type=str, choices=list(DIT_MODELS.keys()), default="DiT-XS/2")
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=1400)
     parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--verbose", type=int, help="0: warning, 1: info, 2: debug", choices=[0, 1, 2], default=1)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--disable-compile", action="store_true")
 
     # Flags
     parser.add_argument("--use-cosine-attention", action="store_true")
+    parser.add_argument("--use-mp-attention", action="store_true")
     parser.add_argument("--use-weight-normalization", action="store_true")
     parser.add_argument("--use-forced-weight-normalization", action="store_true")
     parser.add_argument("--use-mp-residual", action="store_true")
     parser.add_argument("--use-mp-silu", action="store_true")
+    parser.add_argument("--use-no-layernorm", action="store_true")
+    parser.add_argument("--use-mp-pos-enc", action="store_true")
 
     args = parser.parse_args()
     main(args)
