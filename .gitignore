@@ -59,3 +59,6 @@ slurm/
 notebooks/
 __pycache__/
 test_mp.py
+pretrained_models/
+EricsPlayground.ipynb
+data/
