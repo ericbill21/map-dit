@@ -9,9 +9,54 @@ import yaml
 import argparse
 import logging
 import os
+import math
 
 from models import DiT_models
 from diffusion import create_diffusion
+
+from torch.optim.lr_scheduler import LRScheduler
+
+class CustomScheduler(LRScheduler):
+    """ Custom learning rate scheduler that combines a linear warmup with a square root decay
+
+    Args:
+        base_lr: a float representing the initial learning rate
+        batch_size: an integer representing the batch size
+        warmup_images: an integer representing the ending number of images to use for linear warmup
+        decay_batches: an integer representing the starting number of batches to use for square root decay
+
+    """
+    def __init__(self, 
+        optimizer: torch.optim.Optimizer, 
+        base_lr: float,
+        batch_size: int,
+        warmup_images: int=1e6, 
+        decay_images: int=10e6):
+
+        self.base_lr = base_lr
+        self.batch_size = batch_size
+        self.warmup_images = warmup_images
+        self.decay_images = decay_images
+
+        super(CustomScheduler, self).__init__(optimizer, last_epoch=-1, verbose="deprecated")
+        self._step_count = 1
+
+    def get_lr(self):
+        res = self.base_lr
+
+        # Results in linear rampup from 0 to 1 over the first 'rampup_Mimg' million images
+        if self.warmup_images > 0:
+            res *= min(self._step_count / self.warmup_images, 1)
+
+        # Result in a delayed decay of the learning rate
+        if self.decay_images > 0:
+            res /= math.sqrt(max(self._step_count / self.decay_images, 1))
+
+        # Update _step_count
+        self._step_count += self.batch_size
+
+        self.last_lr = [res for _ in self.optimizer.param_groups]
+        return self.last_lr
 
 
 class CustomDataset(Dataset):
@@ -80,6 +125,8 @@ def main(args):
         use_no_layernorm=args.use_no_layernorm,
     ).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
+    scheduler = CustomScheduler(opt, base_lr=1e-4, batch_size=args.batch_size, warmup_images=args.warmup_images, decay_images=args.decay_images)
+
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     # Exponential moving average
@@ -113,6 +160,7 @@ def main(args):
             opt.zero_grad()
             loss.backward()
             opt.step()
+            scheduler.step()
             update_ema(ema, model)
 
             # Log loss values
@@ -213,6 +261,10 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
+
+    # Scheduler
+    parser.add_argument("--warmup-images", type=int, default=1e6)
+    parser.add_argument("--decay-images", type=int, default=5e6)
 
     # Flags
     parser.add_argument("--use-cosine-attention", action="store_true")
