@@ -1,7 +1,7 @@
 import torch
 from torchvision.utils import save_image
 from diffusion import create_diffusion
-from models import DiT_models
+from src.models import DIT_MODELS
 import argparse
 
 
@@ -11,7 +11,7 @@ def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load model
-    model = DiT_models[args.model](
+    model = DIT_MODELS[args.model](
         input_size=args.image_size,
         num_classes=args.num_classes,
     ).to(device)
@@ -55,7 +55,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XS/2")
+    parser.add_argument("--model", type=str, choices=list(DIT_MODELS.keys()), default="DiT-XS/2")
     parser.add_argument("--ckpt", type=str, required=True)
     parser.add_argument("--image-size", type=int, choices=[32, 64, 128, 256, 512], default=32)
     parser.add_argument("--num-classes", type=int, default=1000)
