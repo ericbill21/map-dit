@@ -29,7 +29,7 @@ class MPConv2d(nn.Module):
         self.use_wn = use_wn
         self.use_forced_wn = use_forced_wn
 
-        self.weight = nn.Parameter(torch.empty(out_channels, in_channels+1, kernel_size, kernel_size))
+        self.weight = nn.Parameter(torch.empty(out_channels, in_channels, kernel_size, kernel_size))
 
         if use_wn:
             self.gain = nn.Parameter(torch.tensor(0. if zero_init else 1.), requires_grad=learn_gain)
@@ -60,6 +60,4 @@ class MPConv2d(nn.Module):
         else:
             w = self.weight
 
-        # Concatenate 1 to channels for bias
-        x = torch.cat([x, torch.ones(*x.shape[:-3], 1, *x.shape[-2:]).to(x.device)], dim=-3)
         return F.conv2d(x, w, stride=self.stride, padding=self.padding)

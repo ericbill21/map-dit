@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
+from diffusion import create_diffusion
 from collections import OrderedDict
 from copy import deepcopy
 from glob import glob
@@ -13,7 +14,7 @@ import math
 from ema import EMA
 
 from src.models import DIT_MODELS
-from diffusion import create_diffusion
+from utils import get_model
 
 from torch.optim.lr_scheduler import LRScheduler
 
@@ -86,18 +87,7 @@ def main(args):
     # Setup diffusion process
     diffusion = create_diffusion(timestep_respacing="")
 
-    model = DIT_MODELS[args.model](
-        input_size=dataset.data_size,
-        num_classes=args.num_classes,
-        use_cosine_attention=args.use_cosine_attention,
-        use_mp_attention=args.use_mp_attention,
-        use_weight_normalization=args.use_weight_normalization,
-        use_forced_weight_normalization=args.use_forced_weight_normalization,
-        use_mp_residual=args.use_mp_residual,
-        use_mp_silu=args.use_mp_silu,
-        use_no_layernorm=args.use_no_layernorm,
-        use_mp_pos_enc=args.use_mp_pos_enc,
-    ).to(device)
+    model = get_model(args).to(device)
     model = torch.compile(model, mode="reduce-overhead", fullgraph=True, disable=args.disable_compile)
     ema = EMA(model, results_dir=exp_dir, stds=[0.05, 0.1])
 
@@ -256,6 +246,7 @@ if __name__ == "__main__":
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, required=True)
     parser.add_argument("--model", type=str, choices=list(DIT_MODELS.keys()), default="DiT-XS/2")
+    parser.add_argument("--input-size", type=int, default=32)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=1400)
     parser.add_argument("--batch-size", type=int, default=256)
@@ -273,7 +264,6 @@ if __name__ == "__main__":
 
     # Flags
     parser.add_argument("--use-cosine-attention", action="store_true")
-    parser.add_argument("--use-mp-attention", action="store_true")
     parser.add_argument("--use-weight-normalization", action="store_true")
     parser.add_argument("--use-forced-weight-normalization", action="store_true")
     parser.add_argument("--use-mp-residual", action="store_true")

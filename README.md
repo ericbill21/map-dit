@@ -12,5 +12,5 @@ python train.py --data-path /path/to/data --results-dir /path/to/results --model
 ## Sampling
 
 ```bash
-python sample.py --model DiT-XS/2 --ckpt /path/to/ckpt
+python sample.py --result-dir /path/to/result --ckpt <checkpoint>.pt --class-label 2 --seed 42 --cfg-scale 1.5
 ```

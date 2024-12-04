@@ -8,7 +8,7 @@ from src.blocks.timestep_embedder import TimestepEmbedder
 from src.blocks.patch_embedder import PatchEmbedder
 from src.blocks.final_layer import FinalLayer
 from src.pos_embed import get_2d_sincos_pos_embed
-from src.utils import mp_sum, magnitude
+from src.utils import mp_sum
 
 
 class DiT(nn.Module):
@@ -27,7 +27,6 @@ class DiT(nn.Module):
         num_classes: int=1000,
         learn_sigma: bool=True,
         use_cosine_attention: bool=False,
-        use_mp_attention: bool=False,
         use_weight_normalization: bool=False,
         use_forced_weight_normalization: bool=False,
         use_mp_residual: bool=False,
@@ -44,9 +43,10 @@ class DiT(nn.Module):
         self.num_heads = num_heads
         self.use_mp_residual = use_mp_residual
 
+        # Add one to the in_channels for input bias
         self.x_embedder = PatchEmbedder(
             patch_size,
-            in_channels,
+            in_channels+1,
             hidden_size,
             use_wn=use_weight_normalization,
             use_forced_wn=use_forced_weight_normalization,
@@ -77,7 +77,6 @@ class DiT(nn.Module):
                 num_heads,
                 mlp_ratio=mlp_ratio,
                 use_cosine_attention=use_cosine_attention,
-                use_mp_attention=use_mp_attention,
                 use_wn=use_weight_normalization,
                 use_forced_wn=use_forced_weight_normalization,
                 use_mp_residual=use_mp_residual,
@@ -130,30 +129,30 @@ class DiT(nn.Module):
         Returns: (N, C, H, W)
         """
 
+        # Concatenate 1s to the input for input bias
+        x = torch.cat([x, torch.ones_like(x[:, :1])], dim=1)                   # (N, C+1, H, W)
+
         if self.use_mp_residual:
-            x = mp_sum(self.x_embedder(x), self.pos_embed, t=0.5)              # (N, T, D)
+            x = mp_sum(self.x_embedder(x), self.pos_embed, t=0.5)               # (N, T, D)
         else:
-            x = self.x_embedder(x) + self.pos_embed                            # (N, T, D), where T = H * W / patch_size ** 2
+            x = self.x_embedder(x) + self.pos_embed                             # (N, T, D), where T = H * W / patch_size ** 2
 
-        # print()
-        # print(f"(embedder) {magnitude(x).item():.3f}")
-
-        t = self.t_embedder(t)                                                 # (N, D)
-        y = self.y_embedder(y, self.training)                                  # (N, D)
+        t = self.t_embedder(t)                                                  # (N, D)
+        y = self.y_embedder(y, self.training)                                   # (N, D)
 
         if self.use_mp_residual:
-            c = mp_sum(t, y, t=0.5)                                            # (N, D)
+            c = mp_sum(t, y, t=0.5)                                             # (N, D)
         else:
             c = t + y
 
-        for i, block in enumerate(self.blocks):
-            x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)  # (N, T, D)
-            # print(f"({i}) {magnitude(x).item():.3f}")
+        for block in self.blocks:
+            if self.training:
+                x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)  # (N, T, D)
+            else:
+                x = block(x, c)
 
         x = self.final_layer(x, c)                                              # (N, T, patch_size ** 2 * out_channels)
-        # print(f"(final layer) {magnitude(x).item():.3f}")
-        x = self.unpatchify(x)                                                  # (N, out_channels, H, W)
-        return x
+        return self.unpatchify(x)                                               # (N, out_channels, H, W)
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
         """Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance."""

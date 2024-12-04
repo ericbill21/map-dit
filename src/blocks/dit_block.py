@@ -14,7 +14,6 @@ class DiTBlock(nn.Module):
         hidden_size: int,
         num_heads: int,
         use_cosine_attention: bool,
-        use_mp_attention: bool,
         use_wn: bool,
         use_forced_wn: bool,
         use_mp_residual: bool,
@@ -35,7 +34,6 @@ class DiTBlock(nn.Module):
             hidden_size,
             num_heads,
             use_cosine_attention=use_cosine_attention,
-            use_mp_attention=use_mp_attention,
             use_wn=use_wn,
             use_forced_wn=use_forced_wn,
         )
