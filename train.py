@@ -10,6 +10,7 @@ import argparse
 import logging
 import os
 import math
+from ema import EMA
 
 from src.models import DIT_MODELS
 from diffusion import create_diffusion
@@ -98,19 +99,15 @@ def main(args):
         use_mp_pos_enc=args.use_mp_pos_enc,
     ).to(device)
     model = torch.compile(model, mode="reduce-overhead", fullgraph=True, disable=args.disable_compile)
+    ema = EMA(model, results_dir=exp_dir, stds=[0.05, 0.1])
+
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
     scheduler = CustomScheduler(opt, base_lr=1e-4, batch_size=args.batch_size, warmup_images=args.warmup_images, decay_images=args.decay_images)
 
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
-    # Exponential moving average
-    ema = deepcopy(model).to(device)
-    requires_grad(ema, False)
-    update_ema(ema, model, decay=0)
-
     # Important! (This enables embedding dropout for CFG)
     model.train()
-    ema.eval()
 
     # Variables for monitoring/logging purposes
     train_steps = 0
@@ -135,7 +132,7 @@ def main(args):
             loss.backward()
             opt.step()
             scheduler.step()
-            update_ema(ema, model)
+            ema.update(t=train_steps, t_delta=1)
 
             # Log loss values
             running_loss += loss.item()
@@ -161,11 +158,16 @@ def main(args):
             if train_steps % args.ckpt_every == 0 and train_steps > 0:
                 checkpoint = {
                     "model": model.state_dict(),
-                    "ema": ema.state_dict(),
                     "opt": opt.state_dict(),
                 }
+
                 checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
                 torch.save(checkpoint, checkpoint_path)
+
+                # Save EMA snapshot
+                ema.save_snapshot(train_steps)
+
+                ema.save_snapshot(train_steps)
                 logger.info(f"saved checkpoint to {checkpoint_path}")
     
     logger.info("done!")
@@ -225,16 +227,6 @@ def setup_experiment(model_name, results_dir):
     return experiment_dir
 
 
-@torch.no_grad()
-def update_ema(ema_model, model, decay=0.9999):
-    ema_params = OrderedDict(ema_model.named_parameters())
-    model_params = OrderedDict(model.named_parameters())
-
-    for name, param in model_params.items():
-        name = name.replace("module.", "")
-        ema_params[name].mul_(decay).add_(param.data, alpha=1-decay)
-
-
 def requires_grad(model, flag=True):
     for p in model.parameters():
         p.requires_grad = flag
@@ -273,11 +265,11 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--disable-compile", action="store_true")
 
     # Scheduler
     parser.add_argument("--warmup-images", type=int, default=1e6)
     parser.add_argument("--decay-images", type=int, default=5e6)
-    parser.add_argument("--disable-compile", action="store_true")
 
     # Flags
     parser.add_argument("--use-cosine-attention", action="store_true")

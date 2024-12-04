@@ -3,6 +3,7 @@ import numpy as np
 import copy
 import os
 
+# Methods adapted from the paper: https://arxiv.org/abs/2312.02696
 def std_to_gamma(std):
     if not isinstance(std, np.ndarray):
         std = np.array(std)
@@ -13,6 +14,7 @@ def std_to_gamma(std):
     gamma = np.array([np.roots([1, 7, 16 - t, 12 - t]).real.max() for t in tmp], dtype=np.float64)
     return gamma.reshape(std.shape)
 
+# Methods adapted from the paper: https://arxiv.org/abs/2312.02696
 def gamma_to_std(gammas):
     if not isinstance(gammas, np.ndarray):
         gammas = np.array(gammas)
@@ -20,12 +22,13 @@ def gamma_to_std(gammas):
     gamma = gammas.astype(np.float64)
     return np.sqrt((gamma + 1) / (np.square(gamma + 2) * (gamma + 3)))
 
+# Methods adapted from the paper: https://arxiv.org/abs/2312.02696
 def calc_beta(std, t, delta_t):
     """ Calculates the beta value for the EMA update"""
     gamma = std_to_gamma(np.array(std))
     return np.pow(1 - delta_t / (t + delta_t), gamma + 1)
 
-# Method taken directly form the paper: https://arxiv.org/abs/2312.02696
+# Methods adapted from the paper: https://arxiv.org/abs/2312.02696
 def p_dot_p(t_a, gamma_a, t_b, gamma_b):
     t_ratio = t_a / t_b
 
@@ -36,7 +39,7 @@ def p_dot_p(t_a, gamma_a, t_b, gamma_b):
     den = (gamma_a + gamma_b + 1) * t_max
     return num / den
 
-# Method taken directly form the paper: https://arxiv.org/abs/2312.02696
+# Methods adapted from the paper: https://arxiv.org/abs/2312.02696
 def solve_weights(t_i, gamma_i, t_r, gamma_r):
     rv = lambda x: np.float64(x).reshape(-1, 1)
     cv = lambda x: np.float64(x).reshape(1, -1)
@@ -45,6 +48,7 @@ def solve_weights(t_i, gamma_i, t_r, gamma_r):
     B = p_dot_p(rv(t_i), rv(gamma_i), cv(t_r), cv(gamma_r))
     X = np.linalg.solve(A, B)
     return X
+
 
 def calculate_posthoc_ema(out_std, results_dir):
     files = [f for f in os.listdir(results_dir) if f.startswith("ema_")]
@@ -115,7 +119,7 @@ class EMA():
     
     @torch.no_grad()
     def save_snapshot(self, t):
-        """ Saves the EMA model to disk
+        """ Saves the EMA models to disk at the current time step t
 
             Args:
                 t: the current time step
