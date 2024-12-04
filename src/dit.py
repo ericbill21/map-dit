@@ -27,7 +27,6 @@ class DiT(nn.Module):
         num_classes: int=1000,
         learn_sigma: bool=True,
         use_cosine_attention: bool=False,
-        use_mp_attention: bool=False,
         use_weight_normalization: bool=False,
         use_forced_weight_normalization: bool=False,
         use_mp_residual: bool=False,

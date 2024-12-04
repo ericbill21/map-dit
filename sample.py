@@ -1,33 +1,41 @@
 import torch
 from torchvision.utils import save_image
 from diffusion import create_diffusion
-from src.models import DIT_MODELS
 import argparse
+import yaml
+import os
+
+from utils import get_model, CLS_LOC_MAPPING
 
 
 def main(args):
-    torch.manual_seed(args.seed)
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
+
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Load model
-    model = DIT_MODELS[args.model](
-        input_size=args.image_size,
-        num_classes=args.num_classes,
-    ).to(device)
+    with open(os.path.join(args.result_dir, "config.yaml"), "r") as f:
+        train_args = yaml.safe_load(f)
 
-    state_dict = torch.load(args.ckpt, map_location=device, weights_only=True)
+    # Load model
+    model = get_model(train_args).to(device)
+    state_dict = torch.load(
+        os.path.join(args.result_dir, "checkpoints", args.ckpt),
+        map_location=device,
+        weights_only=True,
+    )
     model.load_state_dict(state_dict["model"])
     model.eval()
 
     diffusion = create_diffusion(str(args.num_sampling_steps))
 
     # Labels to condition the model on
-    class_labels = [416] * 64
+    class_labels = [args.class_label] * 64
 
     # Create sampling noise
     n = len(class_labels)
-    z = torch.randn(n, 3, args.image_size, args.image_size, device=device)
+    z = torch.randn(n, 3, train_args["input_size"], train_args["input_size"], device=device)
     y = torch.tensor(class_labels, device=device)
 
     # Setup CFG
@@ -52,15 +60,16 @@ def main(args):
     # Save and display images
     save_image(samples, "sample.png", nrow=8, normalize=True, value_range=(-1, 1))
 
+    print(f"output class: {CLS_LOC_MAPPING[args.class_label]} ({args.class_label})")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, choices=list(DIT_MODELS.keys()), default="DiT-XS/2")
+    parser.add_argument("--result-dir", type=str, required=True)
     parser.add_argument("--ckpt", type=str, required=True)
-    parser.add_argument("--image-size", type=int, choices=[32, 64, 128, 256, 512], default=32)
-    parser.add_argument("--num-classes", type=int, default=1000)
+    parser.add_argument("--class-label", type=int, default=2)
     parser.add_argument("--cfg-scale", type=float, default=4.0)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
     main(args)
