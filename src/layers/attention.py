@@ -12,7 +12,6 @@ class Attention(nn.Module):
         in_dim: int,
         num_heads: int,
         use_cosine_attention: bool,
-        use_mp_attention: bool,
         use_wn: bool,
         use_forced_wn: bool,
     ):
@@ -21,7 +20,6 @@ class Attention(nn.Module):
         assert in_dim % num_heads == 0
 
         self.use_cosine = use_cosine_attention
-        self.use_mp_attention = use_mp_attention
         self.num_heads = num_heads
         self.head_dim = in_dim // num_heads
 
@@ -50,10 +48,7 @@ class Attention(nn.Module):
             q = normalize(q)
             k = normalize(k)
 
-        attn = q @ k.transpose(-1, -2) * self.scale          # (...B, H, T, T)
-        attn = F.softmax(attn, dim=-1)                       # (...B, H, T, T)
-        out = attn @ v                                       # (...B, H, T, D')
-
+        out = F.scaled_dot_product_attention(q, k, v, scale=self.scale)     # (...B, H, T, D')
         out = out.transpose(-3, -2)                                         # (...B, T, H, D')
         out = out.reshape(*x.shape)                                         # (...B, T, D)
 
