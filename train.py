@@ -44,7 +44,6 @@ def main(args):
         input_size=dataset.data_size,
         num_classes=args.num_classes,
         use_cosine_attention=args.use_cosine_attention,
-        use_mp_attention=args.use_mp_attention,
         use_weight_normalization=args.use_weight_normalization,
         use_forced_weight_normalization=args.use_forced_weight_normalization,
         use_mp_residual=args.use_mp_residual,
@@ -229,7 +228,6 @@ if __name__ == "__main__":
 
     # Flags
     parser.add_argument("--use-cosine-attention", action="store_true")
-    parser.add_argument("--use-mp-attention", action="store_true")
     parser.add_argument("--use-weight-normalization", action="store_true")
     parser.add_argument("--use-forced-weight-normalization", action="store_true")
     parser.add_argument("--use-mp-residual", action="store_true")

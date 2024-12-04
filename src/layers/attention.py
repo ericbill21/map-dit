@@ -54,9 +54,6 @@ class Attention(nn.Module):
         attn = F.softmax(attn, dim=-1)                       # (...B, H, T, T)
         out = attn @ v                                       # (...B, H, T, D')
 
-        if self.use_mp_attention:
-            out = out / attn.square().sum(-1, keepdim=True).sqrt()
-
         out = out.transpose(-3, -2)                                         # (...B, T, H, D')
         out = out.reshape(*x.shape)                                         # (...B, T, D)
 

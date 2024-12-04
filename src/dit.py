@@ -77,7 +77,6 @@ class DiT(nn.Module):
                 num_heads,
                 mlp_ratio=mlp_ratio,
                 use_cosine_attention=use_cosine_attention,
-                use_mp_attention=use_mp_attention,
                 use_wn=use_weight_normalization,
                 use_forced_wn=use_forced_weight_normalization,
                 use_mp_residual=use_mp_residual,
