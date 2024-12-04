@@ -137,7 +137,8 @@ def main(args):
                 avg_loss = torch.tensor(running_loss / log_steps, device=device)
                 avg_loss = avg_loss.item()
                 logger.info(f"(step={train_steps:07d}) train loss: {avg_loss:.4f}, train steps/sec: {steps_per_sec:.2f}")
-                logger.debug(f"(memory) current={bytes_to_gb(torch.cuda.memory_allocated()):.2f}GB, max={bytes_to_gb(torch.cuda.max_memory_allocated()):.2f}GB")
+                logger.debug(f"(memory) current={bytes_to_gb(torch.cuda.memory_allocated()):.2f}GB, \
+                                max={bytes_to_gb(torch.cuda.max_memory_allocated()):.2f}GB")
 
                 # Reset monitoring variables
                 running_loss = 0
@@ -270,6 +271,7 @@ if __name__ == "__main__":
     parser.add_argument("--use-mp-silu", action="store_true")
     parser.add_argument("--use-no-layernorm", action="store_true")
     parser.add_argument("--use-mp-pos-enc", action="store_true")
+    parser.add_argument("--use-mp-fourier", action="store_true")
 
     args = parser.parse_args()
     main(args)

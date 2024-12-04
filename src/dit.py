@@ -31,6 +31,7 @@ class DiT(nn.Module):
         use_forced_weight_normalization: bool=False,
         use_mp_residual: bool=False,
         use_mp_silu: bool=False,
+        use_mp_fourier: bool=False,
         use_no_layernorm: bool=False,
         use_mp_pos_enc: bool=False,
     ):
@@ -56,6 +57,7 @@ class DiT(nn.Module):
             use_wn=use_weight_normalization,
             use_forced_wn=use_forced_weight_normalization,
             use_mp_silu=use_mp_silu,
+            use_mp_fourier=use_mp_fourier,
         )
         self.y_embedder = LabelEmbedder(
             num_classes,
