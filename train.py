@@ -122,7 +122,8 @@ class CustomDataset(Dataset):
             self.transform = transforms.Compose([
                 transforms.RandomHorizontalFlip(),
                 transforms.ConvertImageDtype(torch.float32),
-                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5], inplace=True)
+                # Mean and std computed over 32x32 dataset
+                transforms.Normalize([0.4811, 0.4575, 0.4079], [0.2604, 0.2532, 0.2682], inplace=True)
             ])
         else:
             self.transform = None

@@ -1,4 +1,5 @@
 import torch
+import einops
 import math
 
 
@@ -21,3 +22,28 @@ def normalize(x: torch.Tensor, eps=1e-4) -> torch.Tensor:
 def magnitude(x: torch.Tensor) -> torch.Tensor:
     """Computes the mean magnitude."""
     return x.square().mean(-1).sqrt().mean()
+
+
+def patchify(x: torch.Tensor, patch_size: int) -> torch.Tensor:
+    """
+    Args:
+        x: (B, C, H, W)
+        patch_size: int (P)
+    
+    Returns: (B, (H / P) * (W / P), C * P * P)
+    """
+
+    return einops.rearrange(x, "b c (h p1) (w p2) -> b (h w) (p1 p2 c)", p1=patch_size, p2=patch_size)
+
+
+def unpatchify(x: torch.Tensor, input_size: int, patch_size: int) -> torch.Tensor:
+    """
+    Args:
+        x: (B, (H / P) * (W / P), C * P * P)
+        input_size: int (H or W)
+        patch_size: int (P)
+    
+    Returns: (B, C, H, W)
+    """
+
+    return einops.rearrange(x, "b (h w) (p1 p2 c) -> b c (h p1) (w p2)", h=input_size // patch_size, w=input_size // patch_size, p1=patch_size, p2=patch_size)
