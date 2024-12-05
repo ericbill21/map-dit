@@ -16,49 +16,7 @@ from ema import EMA
 from src.models import DIT_MODELS
 from utils import get_model
 
-from torch.optim.lr_scheduler import LRScheduler
-
-class CustomScheduler(LRScheduler):
-    """ Custom learning rate scheduler that combines a linear warmup with a square root decay
-
-    Args:
-        base_lr: a float representing the initial learning rate
-        batch_size: an integer representing the batch size
-        warmup_images: an integer representing the ending number of images to use for linear warmup
-        decay_batches: an integer representing the starting number of batches to use for square root decay
-
-    """
-    def __init__(self, 
-        optimizer: torch.optim.Optimizer, 
-        base_lr: float,
-        batch_size: int,
-        warmup_images: int=1e6, 
-        decay_images: int=10e6):
-
-        self.base_lr = base_lr
-        self.batch_size = batch_size
-        self.warmup_images = warmup_images
-        self.decay_images = decay_images
-
-        super(CustomScheduler, self).__init__(optimizer, last_epoch=-1, verbose="deprecated")
-        self._step_count = 1
-
-    def get_lr(self):
-        res = self.base_lr
-
-        # Results in linear rampup from 0 to 1 over the first 'rampup_Mimg' million images
-        if self.warmup_images > 0:
-            res *= min(self._step_count / self.warmup_images, 1)
-
-        # Result in a delayed decay of the learning rate
-        if self.decay_images > 0:
-            res /= math.sqrt(max(self._step_count / self.decay_images, 1))
-
-        # Update _step_count
-        self._step_count += self.batch_size
-
-        self.last_lr = [res for _ in self.optimizer.param_groups]
-        return self.last_lr
+from torch.optim.lr_scheduler import LambdaLR
 
 
 torch.set_float32_matmul_precision("high")
@@ -92,7 +50,7 @@ def main(args):
     ema = EMA(model, results_dir=exp_dir, stds=[0.05, 0.1])
 
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
-    scheduler = CustomScheduler(opt, base_lr=1e-4, batch_size=args.batch_size, warmup_images=args.warmup_images, decay_images=args.decay_images)
+    scheduler = LambdaLR(opt, create_lr_lambda(args.num_lin_warmup, args.start_decay))
 
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
@@ -121,6 +79,7 @@ def main(args):
             opt.zero_grad()
             loss.backward()
             opt.step()
+
             scheduler.step()
             ema.update(t=train_steps, t_delta=1)
 
@@ -200,6 +159,28 @@ class CustomDataset(Dataset):
 
         return feature, self.labels[idx]
 
+def create_lr_lambda(num_lin_warmup:int, start_decay:int):
+    """
+    Create a functions that returns the learning rate at a given step for the scheduler.
+
+    Args:
+        base_lr: initial learning rate
+        num_lin_warmup: number of steps for linear warmup
+        start_decay: step to start decaying the learning rate
+    Returns: (...B, out_dim)
+    """
+
+    def lr_lambda(step):
+        if step + 1 < num_lin_warmup:
+            return (step + 1) / num_lin_warmup
+
+        if step >= start_decay:
+            return 1.0 / math.sqrt(max(step / start_decay, 1))
+
+        return 1.0
+
+    return lr_lambda
+
 
 def setup_experiment(model_name, results_dir):
     """Create an experiment directory for the current run."""
@@ -260,8 +241,8 @@ if __name__ == "__main__":
     parser.add_argument("--disable-compile", action="store_true")
 
     # Scheduler
-    parser.add_argument("--warmup-images", type=int, default=1e6)
-    parser.add_argument("--decay-images", type=int, default=5e6)
+    parser.add_argument("--num-lin-warmup", type=int, default=1_000, help="Number of steps for linear warmup of the learning rate")
+    parser.add_argument("--start-decay", type=int, default=10_000, help="Step to start decaying the learning rate")
 
     # Flags
     parser.add_argument("--use-cosine-attention", action="store_true")
