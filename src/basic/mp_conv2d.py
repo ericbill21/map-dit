@@ -56,7 +56,7 @@ class MPConv2d(nn.Module):
 
         # Traditional weight normalization
         if self.use_wn:
-            w = normalize(self.weight) * self.gain / math.sqrt((self.in_channels + 1) * self.kernel_size * self.kernel_size)
+            w = normalize(self.weight) * self.gain / math.sqrt((self.in_channels) * self.kernel_size * self.kernel_size)
         else:
             w = self.weight
 
