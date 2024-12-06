@@ -114,12 +114,12 @@ def main(args):
                 checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
                 torch.save(checkpoint, checkpoint_path)
       
-                logger.info(f"saved checkpoint to {checkpoint_path} at step {train_steps}")
+                logger.info(f"saved checkpoint to {checkpoint_path} at step {train_steps:07d}")
             
             # Save EMA snapshot
             if train_steps % args.ema_snapshot_every == 0 and train_steps > 0:
                 ema.save_snapshot(train_steps)
-                logger.info(f"saved EMA snapshot at step {train_steps}")
+                logger.info(f"saved EMA snapshot to {ema.results_dir} at step {train_steps:07d}")
     
     logger.info("done!")
 

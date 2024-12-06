@@ -72,9 +72,11 @@ if __name__ == "__main__":
     # as the state dicts saved by the ema are in float16
     parser.add_argument("--ckpt", type=str, required=False)
     
+    # TODO: Investigate why for values >= 0.3 the model outputs zeros
     parser.add_argument("--ema-std", type=float, default=0.05)
+    
     parser.add_argument("--output-file", type=str, default="sample.png")
-    parser.add_argument("--class-label", type=int, default=2)
+    parser.add_argument("--class-label", type=int, default=408)
     parser.add_argument("--cfg-scale", type=float, default=4.0)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
     parser.add_argument("--seed", type=int, default=None)
