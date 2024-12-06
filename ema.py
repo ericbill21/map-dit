@@ -52,6 +52,7 @@ def solve_weights(t_i, gamma_i, t_r, gamma_r):
 
 def calculate_posthoc_ema(out_std, results_dir):
     files = [f for f in os.listdir(results_dir) if f.startswith("ema_")]
+    assert len(files) > 0, "No EMA snapshots found in the results directory"
 
     in_stds, in_ts, state_dicts = [], [], []
     for file in os.listdir(results_dir):
@@ -74,14 +75,24 @@ def calculate_posthoc_ema(out_std, results_dir):
         in_stds.append(snapshot["std"])
         in_ts.append(snapshot["t"])
         state_dicts.append(snapshot["state_dict"])
-
-    in_gammas = std_to_gamma(np.array(in_stds))
+    
+    # Convert to numpy arrays
+    in_stds = np.array(in_stds)
+    in_gammas = std_to_gamma(in_stds)
     in_ts = np.array(in_ts)
     out_ts = np.max(in_ts)
     out_gamma = std_to_gamma(out_std)
+
+    # If the output std is in the input stds, return the corresponding state_dict
+    if out_std in in_stds:
+        idx = np.argmax(
+            (out_std == in_stds) & (out_ts == in_ts)
+        )
+        # Convert the state_dict to float32
+        return { k : v.float() for k, v in state_dicts[idx].items() }
     
     # Solve linear system
-    weights = solve_weights(in_ts, in_gammas, out_ts, out_gamma)
+    weights = solve_weights(in_ts, in_gammas, out_ts, out_gamma).flatten()
 
     # Calculate the EMA state_dict
     res = { k : torch.zeros_like(v, dtype=torch.float32) for k, v in state_dicts[0].items() }

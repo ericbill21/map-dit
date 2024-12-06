@@ -5,6 +5,7 @@ import argparse
 import yaml
 import os
 
+from ema import calculate_posthoc_ema
 from utils import get_model, CLS_LOC_MAPPING
 
 
@@ -22,12 +23,9 @@ def main(args):
     model = get_model(train_args).to(device)
     model = torch.compile(model, mode="reduce-overhead", fullgraph=True, disable=train_args["disable_compile"])
 
-    state_dict = torch.load(
-        os.path.join(args.result_dir, "checkpoints", args.ckpt),
-        map_location=device,
-        weights_only=True,
-    )
-    model.load_state_dict(state_dict["model"])
+    # Load EMA state_dict
+    ema_state_dict = calculate_posthoc_ema(args.ema_std, os.path.join(args.result_dir, "ema"))
+    model.load_state_dict(ema_state_dict)
     model.eval()
 
     diffusion = create_diffusion(str(args.num_sampling_steps))
@@ -68,7 +66,13 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--result-dir", type=str, required=True)
-    parser.add_argument("--ckpt", type=str, required=True)
+    
+    #TODO: Not used, as we simply use the ema
+    # Might still be interesing to have the option to use the checkpoint
+    # as the state dicts saved by the ema are in float16
+    parser.add_argument("--ckpt", type=str, required=False)
+    
+    parser.add_argument("--ema-std", type=float, default=0.05)
     parser.add_argument("--output-file", type=str, default="sample.png")
     parser.add_argument("--class-label", type=int, default=2)
     parser.add_argument("--cfg-scale", type=float, default=4.0)
