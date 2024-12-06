@@ -2,13 +2,13 @@ import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
+from src.basic.mp_linear import MPLinear
 from src.blocks.dit_block import DiTBlock
 from src.blocks.label_embedder import LabelEmbedder
 from src.blocks.timestep_embedder import TimestepEmbedder
-from src.blocks.patch_embedder import PatchEmbedder
 from src.blocks.final_layer import FinalLayer
 from src.pos_embed import get_2d_sincos_pos_embed
-from src.utils import mp_sum
+from src.utils import mp_sum, patchify, unpatchify, normalize
 
 
 class DiT(nn.Module):
@@ -40,14 +40,14 @@ class DiT(nn.Module):
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
         self.out_channels = in_channels * 2 if learn_sigma else in_channels
+        self.input_size = input_size
         self.patch_size = patch_size
         self.num_heads = num_heads
         self.use_mp_residual = use_mp_residual
 
         # Add one to the in_channels for input bias
-        self.x_embedder = PatchEmbedder(
-            patch_size,
-            in_channels+1,
+        self.x_embedder = MPLinear(
+            patch_size * patch_size * in_channels + 1,
             hidden_size,
             use_wn=use_weight_normalization,
             use_forced_wn=use_forced_weight_normalization,
@@ -71,7 +71,7 @@ class DiT(nn.Module):
         )
         # Normalize positional embedding to standard variance
         if use_mp_pos_enc:
-            self.pos_embed.copy_(self.pos_embed / self.pos_embed.std())
+            self.pos_embed.copy_(normalize(self.pos_embed))
 
         self.blocks = nn.ModuleList([
             DiTBlock(
@@ -95,25 +95,6 @@ class DiT(nn.Module):
             use_mp_silu=use_mp_silu,
             use_no_layernorm=use_no_layernorm,
         )
-
-    def unpatchify(self, x):
-        """
-        Args:
-            x: (N, T, patch_size**2 * C)
-
-        Returns: (N, H, W, C)
-        """
-
-        c = self.out_channels
-        p = self.patch_size
-        h = w = int(x.shape[1] ** 0.5)
-
-        assert h * w == x.shape[1]
-
-        x = x.reshape(-1, h, w, p, p, c)
-        x = x.permute(0, 5, 1, 3, 2, 4)
-        imgs = x.reshape(-1, c, h * p, w * p)
-        return imgs
     
     def ckpt_wrapper(self, module):
         def ckpt_forward(*inputs):
@@ -131,8 +112,9 @@ class DiT(nn.Module):
         Returns: (N, C, H, W)
         """
 
-        # Concatenate 1s to the input for input bias
-        x = torch.cat([x, torch.ones_like(x[:, :1])], dim=1)                   # (N, C+1, H, W)
+        # Extract patches into features
+        x = patchify(x, self.patch_size)                                        # (N, T, (patch_size ** 2) * in_channels)
+        x = torch.cat([x, torch.ones_like(x[:, :, :1])], dim=-1)                # (N, T, (patch_size ** 2) * in_channels + 1)
 
         if self.use_mp_residual:
             x = mp_sum(self.x_embedder(x), self.pos_embed, t=0.5)               # (N, T, D)
@@ -154,7 +136,7 @@ class DiT(nn.Module):
                 x = block(x, c)
 
         x = self.final_layer(x, c)                                              # (N, T, patch_size ** 2 * out_channels)
-        return self.unpatchify(x)                                               # (N, out_channels, H, W)
+        return unpatchify(x, self.input_size, self.patch_size)
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
         """Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance."""
