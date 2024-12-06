@@ -20,6 +20,8 @@ def main(args):
 
     # Load model
     model = get_model(train_args).to(device)
+    model = torch.compile(model, mode="reduce-overhead", fullgraph=True, disable=train_args["disable_compile"])
+
     state_dict = torch.load(
         os.path.join(args.result_dir, "checkpoints", args.ckpt),
         map_location=device,
@@ -58,7 +60,7 @@ def main(args):
     samples, _ = samples.chunk(2, dim=0)
 
     # Save and display images
-    save_image(samples, "sample.png", nrow=8, normalize=True, value_range=(-1, 1))
+    save_image(samples, args.output_file, nrow=8, normalize=True, value_range=(-1, 1))
 
     print(f"output class: {CLS_LOC_MAPPING[args.class_label]} ({args.class_label})")
 
@@ -67,6 +69,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--result-dir", type=str, required=True)
     parser.add_argument("--ckpt", type=str, required=True)
+    parser.add_argument("--output-file", type=str, default="sample.png")
     parser.add_argument("--class-label", type=int, default=2)
     parser.add_argument("--cfg-scale", type=float, default=4.0)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
