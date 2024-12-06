@@ -113,12 +113,13 @@ def main(args):
 
                 checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
                 torch.save(checkpoint, checkpoint_path)
-
-                # Save EMA snapshot
+      
+                logger.info(f"saved checkpoint to {checkpoint_path} at step {train_steps}")
+            
+            # Save EMA snapshot
+            if train_steps % args.ema_snapshot_every == 0 and train_steps > 0:
                 ema.save_snapshot(train_steps)
-
-                ema.save_snapshot(train_steps)
-                logger.info(f"saved checkpoint to {checkpoint_path}")
+                logger.info(f"saved EMA snapshot at step {train_steps}")
     
     logger.info("done!")
 
@@ -243,6 +244,9 @@ if __name__ == "__main__":
     # Scheduler
     parser.add_argument("--num-lin-warmup", type=int, default=1_000, help="Number of steps for linear warmup of the learning rate")
     parser.add_argument("--start-decay", type=int, default=10_000, help="Step to start decaying the learning rate")
+
+    # EMA
+    parser.add_argument("--ema-snapshot-every", type=int, default=5_000, help="Number of steps to save EMA snapshots")
 
     # Flags
     parser.add_argument("--use-cosine-attention", action="store_true")
