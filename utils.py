@@ -17,6 +17,7 @@ def get_model(args):
         use_mp_silu=args["use_mp_silu"],
         use_no_layernorm=args["use_no_layernorm"],
         use_mp_pos_enc=args["use_mp_pos_enc"],
+        use_fourier=args["use_fourier"],
         use_mp_fourier=args["use_mp_fourier"],
     ) 
 
