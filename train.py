@@ -33,16 +33,16 @@ def main(args):
 
     logger.info(f"experiment directory created at {exp_dir}")
 
+    # Setup data
+    dataset = CustomDataset(args.data_path)
+    loader = DataLoader(dataset, batch_size=int(args.batch_size), num_workers=args.num_workers, shuffle=True, pin_memory=True, drop_last=True)
+    logger.info(f"dataset contains {len(dataset):,} data points ({args.data_path}, {dataset.channels}x{dataset.data_size}x{dataset.data_size})")
+
     # Save arguments
     args.in_channels = dataset.channels
     args.input_size = dataset.data_size
     with open(os.path.join(exp_dir, "config.yaml"), "w") as f:
         yaml.dump(vars(args), f)
-
-    # Setup data
-    dataset = CustomDataset(args.data_path)
-    loader = DataLoader(dataset, batch_size=int(args.batch_size), num_workers=args.num_workers, shuffle=True, pin_memory=True, drop_last=True)
-    logger.info(f"dataset contains {len(dataset):,} data points ({args.data_path}, {dataset.channels}x{dataset.data_size}x{dataset.data_size})")
 
     # Setup diffusion process
     diffusion = create_diffusion(timestep_respacing="")
@@ -223,7 +223,7 @@ if __name__ == "__main__":
     parser.add_argument("--results-dir", type=str, required=True)
     parser.add_argument("--model", type=str, choices=list(DIT_MODELS.keys()), default="DiT-XS/2")
     parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--epochs", type=int, default=1400)
+    parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=0)
@@ -238,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--start-decay", type=int, default=10_000, help="Step to start decaying the learning rate")
 
     # EMA
-    parser.add_argument("--ema-snapshot-every", type=int, default=4_000, help="Number of steps to save EMA snapshots")
+    parser.add_argument("--ema-snapshot-every", type=int, default=1_600, help="Number of steps to save EMA snapshots")
 
     # Flags
     parser.add_argument("--use-cosine-attention", action="store_true")
