@@ -133,7 +133,9 @@ class DiT(nn.Module):
 
         for block in self.blocks:
             if self.training:
-                x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)  # (N, T, D)
+                # We removed checkpointing because we do not need it for our purposes
+                # x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)  # (N, T, D)
+                x = block(x, c)
             else:
                 x = block(x, c)
 
