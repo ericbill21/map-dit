@@ -68,7 +68,7 @@ def main(args):
     
     num_epochs = args.num_steps // len(loader)
     logger.info(f"training for {num_epochs} epochs...")
-    
+
     for epoch in range(num_epochs):
         logger.info(f"beginning epoch {epoch}...")
 
@@ -120,7 +120,7 @@ def main(args):
                 logger.info(f"saved checkpoint to {checkpoint_path} at step {train_steps:07d}")
             
             # Save EMA snapshot
-            if train_steps % args.ema_snapshot_every == 0 and train_steps > 0:
+            if args.ema_snapshot_every != 0 and train_steps % args.ema_snapshot_every == 0 and train_steps > 0:
                 ema.save_snapshot(train_steps)
                 logger.info(f"saved EMA snapshot to {ema.results_dir} at step {train_steps:07d}")
     

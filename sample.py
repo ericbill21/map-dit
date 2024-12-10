@@ -30,7 +30,7 @@ def main(args):
         model.load_state_dict(state_dict["model"])
     else:
         # Load EMA state_dict
-        ema_state_dict = calculate_posthoc_ema(args.ema_std, os.path.join(args.result_dir, "ema"))
+        ema_state_dict = calculate_posthoc_ema(args.ema_std, os.path.join(args.result_dir, "ema"), verbose=True)
         model.load_state_dict(ema_state_dict)
 
     model.eval()

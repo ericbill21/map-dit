@@ -65,7 +65,7 @@ def solve_weights(t_i, gamma_i, t_r, gamma_r):
     return X
 
 
-def calculate_posthoc_ema(out_std, results_dir):
+def calculate_posthoc_ema(out_std, results_dir, verbose=True):
     files = [f for f in os.listdir(results_dir) if f.startswith("ema_")]
     assert len(files) > 0, "No EMA snapshots found in the results directory"
     
@@ -105,7 +105,7 @@ def calculate_posthoc_ema(out_std, results_dir):
     res = { k : torch.zeros_like(v, dtype=torch.float32) for k, v in example["state_dict"].items() }
 
     # Calculate the EMA state_dict
-    for w, file in tqdm(zip(weights, state_dicts_paths), desc="Calculating EMA state_dict", total=len(weights)):
+    for w, file in tqdm(zip(weights, state_dicts_paths), desc="Calculating EMA state_dict", total=len(weights), disable=not verbose):
         sd = torch.load(os.path.join(results_dir, file), weights_only=True)["state_dict"]
 
         for key in res.keys():
