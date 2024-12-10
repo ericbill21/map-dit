@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import copy
 import os
+import re
 
 # Methods adapted from the paper: https://arxiv.org/abs/2312.02696
 def std_to_gamma(std):
@@ -53,28 +54,19 @@ def solve_weights(t_i, gamma_i, t_r, gamma_r):
 def calculate_posthoc_ema(out_std, results_dir):
     files = [f for f in os.listdir(results_dir) if f.startswith("ema_")]
     assert len(files) > 0, "No EMA snapshots found in the results directory"
+    
+    regex_std = r'(?<=ema_)[0-9]*\.[0-9]+'
+    regex_step = r'_(\d+)\.pt$'
 
-    in_stds, in_ts, state_dicts = [], [], []
+    in_stds, in_ts, state_dicts_paths = [], [], []
     for file in os.listdir(results_dir):
-
-        if not file.startswith("ema_"):
-            continue
-
-        snapshot = torch.load(os.path.join(results_dir, file), weights_only=True)
-
-        # Check if file contains the necessary keys
-        assert isinstance(snapshot, dict), "File is not a dictionary"
-        assert "std" in snapshot, "File does not contain std key"
-        assert "t" in snapshot, "File does not contain t key"
-        assert "state_dict" in snapshot, "File does not contain state_dict key"
-
-         # Skip if snapshot is at t=0 as its just the initial state_dict
-        if snapshot["t"] == 0:
-            continue
+        match_std = re.search(regex_std, file)
+        match_step = re.search(regex_step, file)
         
-        in_stds.append(snapshot["std"])
-        in_ts.append(snapshot["t"])
-        state_dicts.append(snapshot["state_dict"])
+        if match_std and match_step:
+            in_stds.append(float(match_std.group(0)))
+            in_ts.append(int(match_step.group(1)))
+            state_dicts_paths.append(file)
     
     # Convert to numpy arrays
     in_stds = np.array(in_stds)
@@ -89,15 +81,21 @@ def calculate_posthoc_ema(out_std, results_dir):
             (out_std == in_stds) & (out_ts == in_ts)
         )
         # Convert the state_dict to float32
-        return { k : v.float() for k, v in state_dicts[idx].items() }
+        snapshot = torch.load(os.path.join(results_dir, state_dicts_paths[idx]), weights_only=True)
+        return { k : v.float() for k, v in snapshot["state_dict"].items() }
     
     # Solve linear system
     weights = solve_weights(in_ts, in_gammas, out_ts, out_gamma).flatten()
 
+    # Create the EMA state_dict
+    example = torch.load(os.path.join(results_dir, state_dicts_paths[0]), weights_only=True)
+    res = { k : torch.zeros_like(v, dtype=torch.float32) for k, v in example["state_dict"].items() }
+
     # Calculate the EMA state_dict
-    res = { k : torch.zeros_like(v, dtype=torch.float32) for k, v in state_dicts[0].items() }
-    for key in res.keys():
-        for w, sd in zip(weights, state_dicts):
+    for w, file in zip(weights, state_dicts_paths):
+        sd = torch.load(os.path.join(results_dir, file), weights_only=True)["state_dict"]
+
+        for key in res.keys():
             res[key] += sd[key].float() * w
 
     return res
