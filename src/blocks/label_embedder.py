@@ -1,16 +1,17 @@
 import torch
 import torch.nn as nn
-
+from src.utils import normalize
 
 class LabelEmbedder(nn.Module):
     """Embeds class labels into vector representations. Also handles label dropout for classifier-free guidance."""
 
-    def __init__(self, num_classes: int, hidden_size: int, dropout_prob: float):
+    def __init__(self, num_classes: int, hidden_size: int, dropout_prob: float, use_mp_embedding: bool=False):
         super().__init__()
         use_cfg_embedding = dropout_prob > 0
         self.embedding_table = nn.Embedding(num_classes + use_cfg_embedding, hidden_size)
         self.num_classes = num_classes
         self.dropout_prob = dropout_prob
+        self.use_mp_embedding = use_mp_embedding
 
         # Init table
         nn.init.normal_(self.embedding_table.weight)
@@ -30,4 +31,8 @@ class LabelEmbedder(nn.Module):
         if (train and use_dropout) or (force_drop_ids is not None):
             labels = self.token_drop(labels, force_drop_ids)
         embeddings = self.embedding_table(labels)
+
+        if self.use_mp_embedding:
+            embeddings = normalize(embeddings)
+
         return embeddings

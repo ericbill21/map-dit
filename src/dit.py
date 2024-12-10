@@ -65,6 +65,7 @@ class DiT(nn.Module):
             num_classes,
             hidden_size,
             class_dropout_prob,
+            use_mp_embedding=use_mp_residual,
         )
 
         self.pos_embed = nn.Parameter(
