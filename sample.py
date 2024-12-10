@@ -40,7 +40,7 @@ def main(args):
 
     # Create sampling noise
     n = len(class_labels)
-    z = torch.randn(n, 4, train_args["input_size"], train_args["input_size"], device=device)
+    z = torch.randn(n, train_args["in_channels"], train_args["input_size"], train_args["input_size"], device=device)
     y = torch.tensor(class_labels, device=device)
 
     # Setup CFG
