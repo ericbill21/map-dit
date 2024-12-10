@@ -43,11 +43,18 @@ def main(args):
 
     model = get_model(args).to(device)
     model = torch.compile(model, mode="reduce-overhead", fullgraph=True, dynamic=False, disable=args.disable_compile)
-    ema = EMA(model, results_dir=exp_dir, stds=[0.01, 0.05, 0.1])
-
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
+    # Setup EMA for the model
+    if args.ema_snapshot_every is None: args.ema_snapshot_every = args.num_steps // 250 # 250 snapshots in total
+    ema = EMA(model, results_dir=exp_dir, stds=[0.01, 0.05, 0.1])
+
+    # Optimizer
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
+
+    # Setup learning rate scheduler 
+    if args.num_lin_warmup is None: args.num_lin_warmup = args.num_steps // 150 # 1/150 of the total number of steps
+    if args.start_decay is None:    args.start_decay = args.num_steps // 10     # 1/10 of the total number of steps
     scheduler = LambdaLR(opt, create_lr_lambda(args.num_lin_warmup, args.start_decay))
 
     # Important! (This enables embedding dropout for CFG)
@@ -59,9 +66,10 @@ def main(args):
     running_loss = 0
     start_time = time()
     
-    logger.info(f"training for {args.epochs} epochs...")
-
-    for epoch in range(args.epochs):
+    num_epochs = args.num_steps // len(loader)
+    logger.info(f"training for {num_epochs} epochs...")
+    
+    for epoch in range(num_epochs):
         logger.info(f"beginning epoch {epoch}...")
 
         for x, y in loader:
@@ -220,7 +228,7 @@ if __name__ == "__main__":
     parser.add_argument("--results-dir", type=str, required=True)
     parser.add_argument("--model", type=str, choices=list(DIT_MODELS.keys()), default="DiT-XS/2")
     parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--epochs", type=int, default=80)
+    parser.add_argument("--num-steps", type=int, default=400_000)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=0)
@@ -231,11 +239,11 @@ if __name__ == "__main__":
     parser.add_argument("--disable-compile", action="store_true")
 
     # Scheduler
-    parser.add_argument("--num-lin-warmup", type=int, default=700, help="Number of steps for linear warmup of the learning rate")
-    parser.add_argument("--start-decay", type=int, default=10_000, help="Step to start decaying the learning rate")
+    parser.add_argument("--num-lin-warmup", type=int, default=None, help="Number of steps for linear warmup of the learning rate")
+    parser.add_argument("--start-decay", type=int, default=None, help="Step to start decaying the learning rate")
 
     # EMA
-    parser.add_argument("--ema-snapshot-every", type=int, default=1_600, help="Number of steps to save EMA snapshots")
+    parser.add_argument("--ema-snapshot-every", type=int, default=None, help="Number of steps to save EMA snapshots")
 
     # Flags
     parser.add_argument("--use-cosine-attention", action="store_true")
