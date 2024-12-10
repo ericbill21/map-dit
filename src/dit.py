@@ -131,11 +131,10 @@ class DiT(nn.Module):
         else:
             c = t + y
 
-        for block in self.blocks:
-            if self.training:
-                x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)  # (N, T, D)
-            else:
-                x = block(x, c)
+        for i, block in enumerate(self.blocks):
+            # We removed checkpointing because we do not need it for our purposes
+            # x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)  # (N, T, D)
+            x = block(x, c)
 
         x = self.final_layer(x, c)                                              # (N, T, patch_size ** 2 * out_channels)
         return unpatchify(x, self.input_size, self.patch_size)

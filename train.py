@@ -33,14 +33,16 @@ def main(args):
 
     logger.info(f"experiment directory created at {exp_dir}")
 
-    # Save arguments
-    with open(os.path.join(exp_dir, "config.yaml"), "w") as f:
-        yaml.dump(vars(args), f)
-
     # Setup data
     dataset = CustomDataset(args.data_path)
     loader = DataLoader(dataset, batch_size=int(args.batch_size), num_workers=args.num_workers, shuffle=True, pin_memory=True, drop_last=True)
     logger.info(f"dataset contains {len(dataset):,} data points ({args.data_path}, {dataset.channels}x{dataset.data_size}x{dataset.data_size})")
+
+    # Save arguments
+    args.in_channels = dataset.channels
+    args.input_size = dataset.data_size
+    with open(os.path.join(exp_dir, "config.yaml"), "w") as f:
+        yaml.dump(vars(args), f)
 
     # Setup diffusion process
     diffusion = create_diffusion(timestep_respacing="")
@@ -96,8 +98,7 @@ def main(args):
                 avg_loss = torch.tensor(running_loss / log_steps, device=device)
                 avg_loss = avg_loss.item()
                 logger.info(f"(step={train_steps:07d}) train loss: {avg_loss:.4f}, train steps/sec: {steps_per_sec:.2f}")
-                logger.debug(f"(memory) current={bytes_to_gb(torch.cuda.memory_allocated()):.2f}GB, \
-                                max={bytes_to_gb(torch.cuda.max_memory_allocated()):.2f}GB")
+                logger.debug(f"(memory) current={bytes_to_gb(torch.cuda.memory_allocated()):.2f}GB, max={bytes_to_gb(torch.cuda.max_memory_allocated()):.2f}GB")
 
                 # Reset monitoring variables
                 running_loss = 0
@@ -128,16 +129,18 @@ class CustomDataset(Dataset):
     def __init__(self, data_path: str):
         self.features = torch.load(os.path.join(data_path, "features.pt"), weights_only=True)
         self.labels = torch.load(os.path.join(data_path, "labels.pt"), weights_only=True)
+        self.stats = torch.load(os.path.join(data_path, "stats.pt"), weights_only=True)
 
         if self.features.dtype == torch.uint8:
             self.transform = transforms.Compose([
                 transforms.RandomHorizontalFlip(),
                 transforms.ConvertImageDtype(torch.float32),
-                # Mean and std computed over 32x32 dataset
-                transforms.Normalize([0.4811, 0.4575, 0.4079], [0.2604, 0.2532, 0.2682], inplace=True)
+                transforms.Normalize(self.stats["mean"], self.stats["std"], inplace=True)
             ])
         else:
-            self.transform = None
+            self.transform = transforms.Compose([
+                transforms.Normalize(self.stats["mean"], self.stats["std"], inplace=True)
+            ])
 
         assert self.features.shape[0] == self.labels.shape[0]
         assert self.features.shape[2] == self.features.shape[3]
@@ -154,22 +157,16 @@ class CustomDataset(Dataset):
         return self.features.shape[0]
 
     def __getitem__(self, idx):
-        feature = self.features[idx]
+        return self.transform(self.features[idx]), self.labels[idx]
 
-        if self.transform is not None:
-            feature = self.transform(feature)
 
-        return feature, self.labels[idx]
-
-def create_lr_lambda(num_lin_warmup:int, start_decay:int):
-    """
-    Create a functions that returns the learning rate at a given step for the scheduler.
+def create_lr_lambda(num_lin_warmup: int, start_decay: int):
+    """Create a function that returns the learning rate at a given step for the scheduler.
 
     Args:
-        base_lr: initial learning rate
         num_lin_warmup: number of steps for linear warmup
         start_decay: step to start decaying the learning rate
-    Returns: (...B, out_dim)
+
     """
 
     def lr_lambda(step):
@@ -184,7 +181,7 @@ def create_lr_lambda(num_lin_warmup:int, start_decay:int):
     return lr_lambda
 
 
-def setup_experiment(model_name, results_dir):
+def setup_experiment(model_name: str, results_dir: os.PathLike):
     """Create an experiment directory for the current run."""
 
     # Make results directory
@@ -199,11 +196,6 @@ def setup_experiment(model_name, results_dir):
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     return experiment_dir
-
-
-def requires_grad(model, flag=True):
-    for p in model.parameters():
-        p.requires_grad = flag
 
 
 def create_logger(logging_dir, verbose: int=1):
@@ -230,9 +222,8 @@ if __name__ == "__main__":
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, required=True)
     parser.add_argument("--model", type=str, choices=list(DIT_MODELS.keys()), default="DiT-XS/2")
-    parser.add_argument("--input-size", type=int, default=32)
     parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--epochs", type=int, default=1400)
+    parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=0)
@@ -243,11 +234,11 @@ if __name__ == "__main__":
     parser.add_argument("--disable-compile", action="store_true")
 
     # Scheduler
-    parser.add_argument("--num-lin-warmup", type=int, default=1_000, help="Number of steps for linear warmup of the learning rate")
+    parser.add_argument("--num-lin-warmup", type=int, default=700, help="Number of steps for linear warmup of the learning rate")
     parser.add_argument("--start-decay", type=int, default=10_000, help="Step to start decaying the learning rate")
 
     # EMA
-    parser.add_argument("--ema-snapshot-every", type=int, default=5_000, help="Number of steps to save EMA snapshots")
+    parser.add_argument("--ema-snapshot-every", type=int, default=1_600, help="Number of steps to save EMA snapshots")
 
     # Flags
     parser.add_argument("--use-cosine-attention", action="store_true")
