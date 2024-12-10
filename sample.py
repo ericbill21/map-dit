@@ -1,13 +1,13 @@
 import torch
 from torchvision.utils import save_image
-from diffusion import create_diffusion
 from diffusers import AutoencoderKL
 import argparse
 import yaml
 import os
 
-from ema import calculate_posthoc_ema
+from src.ema import calculate_posthoc_ema
 from utils import get_model, CLS_LOC_MAPPING
+from diffusion import create_diffusion
 
 
 def main(args):
@@ -91,11 +91,8 @@ if __name__ == "__main__":
     parser.add_argument("--num-sampling-steps", type=int, default=250)
     parser.add_argument("--seed", type=int, default=42)
 
-    # TODO: Investigate why EMA gives worse results in testing...
     parser.add_argument("--ema-std", type=float, default=0.05)
-
-    # TODO: Keep for investigating EMA...
-    parser.add_argument("--ckpt", type=str, default=None, help="Checkpoint to load instead of EMA (should not include .pt).")
+    parser.add_argument("--ckpt", type=str, default=None, help="Checkpoint to load instead of EMA (should not include .pt extension).")
 
     args = parser.parse_args()
     main(args)

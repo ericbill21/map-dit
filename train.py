@@ -1,9 +1,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
+from torch.optim.lr_scheduler import LambdaLR
 from torchvision import transforms
-from diffusion import create_diffusion
-from collections import OrderedDict
-from copy import deepcopy
 from glob import glob
 from time import time
 import yaml
@@ -11,15 +9,11 @@ import argparse
 import logging
 import os
 import math
-from ema import EMA
 
 from src.models import DIT_MODELS
+from src.ema import EMA
 from utils import get_model
-
-from torch.optim.lr_scheduler import LambdaLR
-
-
-torch.set_float32_matmul_precision("high")
+from diffusion import create_diffusion
 
 
 def main(args):
@@ -48,13 +42,13 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="")
 
     model = get_model(args).to(device)
-    model = torch.compile(model, mode="reduce-overhead", fullgraph=True, disable=args.disable_compile)
-    ema = EMA(model, results_dir=exp_dir, stds=[0.05, 0.1])
+    model = torch.compile(model, mode="reduce-overhead", fullgraph=True, dynamic=False, disable=args.disable_compile)
+    ema = EMA(model, results_dir=exp_dir, stds=[0.01, 0.05, 0.1])
+
+    logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
     scheduler = LambdaLR(opt, create_lr_lambda(args.num_lin_warmup, args.start_decay))
-
-    logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     # Important! (This enables embedding dropout for CFG)
     model.train()
@@ -83,7 +77,7 @@ def main(args):
             opt.step()
 
             scheduler.step()
-            ema.update(t=train_steps, t_delta=1)
+            ema.update(t=train_steps, t_delta=args.batch_size)
 
             # Log loss values
             running_loss += loss.item()
@@ -216,6 +210,9 @@ def bytes_to_gb(n):
 
 
 if __name__ == "__main__":
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
     parser = argparse.ArgumentParser()
 
     # Standard

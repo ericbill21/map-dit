@@ -131,7 +131,7 @@ class DiT(nn.Module):
         else:
             c = t + y
 
-        for i, block in enumerate(self.blocks):
+        for block in self.blocks:
             # We removed checkpointing because we do not need it for our purposes
             # x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)  # (N, T, D)
             x = block(x, c)
