@@ -4,6 +4,8 @@ import copy
 import os
 import re
 
+from tqdm import tqdm
+
 
 def std_to_gamma(std):
     """Methods adapted from the paper: https://arxiv.org/abs/2312.02696."""
@@ -103,7 +105,7 @@ def calculate_posthoc_ema(out_std, results_dir):
     res = { k : torch.zeros_like(v, dtype=torch.float32) for k, v in example["state_dict"].items() }
 
     # Calculate the EMA state_dict
-    for w, file in zip(weights, state_dicts_paths):
+    for w, file in tqdm(zip(weights, state_dicts_paths), desc="Calculating EMA state_dict", total=len(weights)):
         sd = torch.load(os.path.join(results_dir, file), weights_only=True)["state_dict"]
 
         for key in res.keys():
