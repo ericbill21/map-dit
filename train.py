@@ -137,11 +137,11 @@ class CustomDataset(Dataset):
             self.transform = transforms.Compose([
                 transforms.RandomHorizontalFlip(),
                 transforms.ConvertImageDtype(torch.float32),
-                transforms.Normalize(self.stats["mean"], self.stats["std"], inplace=True)
+                transforms.Normalize(self.stats["mean"], self.stats["std"])
             ])
         else:
             self.transform = transforms.Compose([
-                transforms.Normalize(self.stats["mean"], self.stats["std"], inplace=True)
+                transforms.Normalize(self.stats["mean"], self.stats["std"])
             ])
 
         assert self.features.shape[0] == self.labels.shape[0]
