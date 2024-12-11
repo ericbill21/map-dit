@@ -14,7 +14,7 @@ def main(args):
     print(f"Using device: {device}...")
 
     print(f"Loading data...")
-    # ds = load_dataset("benjamin-paine/imagenet-1k-128x128", cache_dir=args.hf_cache)
+    ds = load_dataset("benjamin-paine/imagenet-1k-128x128", cache_dir=args.hf_cache)["train"]
 
     print(f"Loading model...")
     vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", cache_dir=args.hf_cache).to(device)
