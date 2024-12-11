@@ -10,12 +10,11 @@ from diffusers.models import AutoencoderKL
 import os
 
 def main(args):
-    print(f"Using device: {device}...")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}...")
 
     print(f"Loading data...")
-    hf_cache = os.path.join(SCRATCH_DIR, "huggingface")
-    ds = load_dataset("benjamin-paine/imagenet-1k-128x128", cache_dir=args.hf_cache)
+    # ds = load_dataset("benjamin-paine/imagenet-1k-128x128", cache_dir=args.hf_cache)
 
     print(f"Loading model...")
     vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", cache_dir=args.hf_cache).to(device)
@@ -26,6 +25,7 @@ def main(args):
                     transforms.functional.pil_to_tensor,
                     transforms.ConvertImageDtype(torch.float32),
                 ])
+
 
     total_len = len(ds)
     latents, labels = [], []
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--output-dir", type=str, required=True, help="Path to directory to save features.pt and labels.pt")
-    pasers.add_argument("--hf-cache", type=str, default=None, help="Path to directory to save HuggingFace datasets")
+    parser.add_argument("--hf-cache", type=str, default=None, help="Path to directory to save HuggingFace datasets")
     parser.add_argument("--batch-size", type=int, default=128, help="Batch size to use for encoding images")
 
     args = parser.parse_args()
