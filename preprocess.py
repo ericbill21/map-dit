@@ -1,43 +1,64 @@
 import argparse
+import torch
+
+from torchvision import transforms
+from tqdm import tqdm
+
+from datasets import load_dataset
+from diffusers.models import AutoencoderKL
+
 import os
 
-import torch
-import numpy as np
-
-
 def main(args):
-    print(f"Loading data from \"{args.data_path}\"...")
-    data, labels = [], []
+    print(f"Using device: {device}...")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Iterate through all .npz files in the data path
-    for file in os.listdir(args.data_path):
-        if not file.endswith(".npz"):
-            continue
-            
-        print(f"\tReading \"{file}\"...")
-        data_batch = np.load(os.path.join(args.data_path, file))
-        data.append(data_batch["data"])
-        labels.append(data_batch["labels"])
+    print(f"Loading data...")
+    hf_cache = os.path.join(SCRATCH_DIR, "huggingface")
+    ds = load_dataset("benjamin-paine/imagenet-1k-128x128", cache_dir=args.hf_cache)
 
-    if len(data) == 0:
-        ValueError(f"No \".npz\" files found in \"{args.data_path}\"")
-    
-    print(f"Saving data to \"{args.output_dir}\"...")
-    output_dir = os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Concatenate all data and labels, cast to torch tensors, and convert to 3x32x32
-    data = torch.from_numpy(np.concatenate(data, axis=0)).byte().reshape(-1, 3, 32, 32)
-    labels = torch.from_numpy(np.concatenate(labels, axis=0)).long()
+    print(f"Loading model...")
+    vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", cache_dir=args.hf_cache).to(device)
+
+    torch.set_grad_enabled(False)
+
+    transform = transforms.Compose([
+                    transforms.functional.pil_to_tensor,
+                    transforms.ConvertImageDtype(torch.float32),
+                ])
+
+    total_len = len(ds)
+    latents, labels = [], []
+    for idx in tqdm(range(0, total_len, args.batch_size)):
+        tail = min(idx+args.batch_size, total_len)
+
+        imgs = []
+        for img in ds[idx:tail]["image"]:
+            imgs.append(transform(img))
+        
+        imgs = torch.stack(imgs, dim=0).to(device)
+        latent = vae.encode(imgs).latent_dist.sample()
+        latents.append(latent.cpu())
+        
+        labels += ds[idx:tail]["label"]
+
+    print("Concatenating data...")
+    latents = torch.cat(latents, dim=0)
+    labels = torch.tensor(labels)
+    stats = { "mean": latents.mean(dim=[0, 2, 3]), "std": latents.std(dim=[0, 2, 3]) }
 
     # Save data and labels
-    torch.save(data, os.path.join(args.output_dir, "features.pt"))
-    torch.save(labels, os.path.join(args.output_dir, "labels.pt"))
+    print(f"Saving data to \"{args.output_dir}\"...")
+    torch.save(latents, os.path.join(args.output_dir, "features.pt"))
+    torch.save(labels,  os.path.join(args.output_dir, "labels.pt"))
+    torch.save(stats,   os.path.join(args.output_dir, "stats.pt"))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--data-path", type=str, required=True, help="Path to directory containing .npz files")
     parser.add_argument("--output-dir", type=str, required=True, help="Path to directory to save features.pt and labels.pt")
+    pasers.add_argument("--hf-cache", type=str, default=None, help="Path to directory to save HuggingFace datasets")
+    parser.add_argument("--batch-size", type=int, default=128, help="Batch size to use for encoding images")
 
     args = parser.parse_args()
     main(args)
