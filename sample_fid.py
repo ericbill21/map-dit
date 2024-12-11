@@ -95,7 +95,8 @@ def main(args):
     samples = np.concatenate(samples_gather, axis=0)
     samples = samples[:args.num_samples]
 
-    np.savez(os.path.join(args.result_dir, "samples.npz"), arr_0=samples)
+    os.makedirs(os.path.join(args.result_dir, "fid_samples"), exist_ok=True)
+    np.savez(os.path.join(args.result_dir, "fid_samples", args.output_file), arr_0=samples)
 
 
 if __name__ == "__main__":
@@ -108,6 +109,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--output-file", type=str, default="samples.npz", help="Filename in which to store samples.")
 
     parser.add_argument("--ema-std", type=float, default=0.05)
     parser.add_argument("--ckpt", type=str, default=None, help="Checkpoint to load instead of EMA (should not include .pt extension).")

@@ -122,8 +122,8 @@ def main(args):
                     "opt": opt.state_dict(),
                 }
 
-                logger.info(f"saving checkpoint to {checkpoint_path} at step {train_steps}...")
                 checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
+                logger.info(f"saving checkpoint to {checkpoint_path} at step {train_steps}...")
                 torch.save(checkpoint, checkpoint_path)
 
             # Save EMA snapshot
@@ -235,7 +235,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-    # Standard
+    # Training loop
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, required=True)
     parser.add_argument("--model", type=str, choices=list(DIT_MODELS.keys()), default="DiT-XS/2")
@@ -249,14 +249,14 @@ if __name__ == "__main__":
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
 
-    # Scheduler
+    # Learning rate scheduler
     parser.add_argument("--num-lin-warmup", type=int, default=None, help="Number of steps for linear warmup of the learning rate")
     parser.add_argument("--start-decay", type=int, default=None, help="Step to start decaying the learning rate")
 
     # EMA
     parser.add_argument("--ema-snapshot-every", type=int, default=None, help="Number of steps to save EMA snapshots")
 
-    # Flags
+    # Magnitude preserving feature flags
     parser.add_argument("--use-cosine-attention", action="store_true")
     parser.add_argument("--use-weight-normalization", action="store_true")
     parser.add_argument("--use-forced-weight-normalization", action="store_true")
