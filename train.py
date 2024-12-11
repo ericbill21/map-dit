@@ -19,11 +19,11 @@ from diffusion import create_diffusion
 def main(args):
     torch.manual_seed(args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"using device {device}")
 
     # Setup experiment directory
     exp_dir = setup_experiment(args.model, args.results_dir)
     logger = create_logger(exp_dir, verbose=args.verbose)
+    logger.info(f"using device {device}")
     logger.info(f"experiment directory created at {exp_dir}")
 
     # Setup data
