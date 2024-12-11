@@ -11,9 +11,6 @@ from diffusion import create_diffusion
 
 
 def main(args):
-    if args.seed is not None:
-        torch.manual_seed(args.seed)
-
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -25,25 +22,26 @@ def main(args):
     model = torch.compile(model, mode="reduce-overhead", fullgraph=True, disable=train_args["disable_compile"])
     model.eval()
 
-
     # Labels to condition the model on
     ema_stds = [0.001, 0.01, 0.05, 0.1, 0.15, 0.2]
     class_labels = [args.class_label] * 8
 
-    # Create sampling noise
-    n = len(class_labels)
-    z_og = torch.randn(n, train_args["in_channels"], train_args["input_size"], train_args["input_size"], device=device)
-
     res = []
     for s in ema_stds:
+        if args.seed is not None:
+            torch.manual_seed(args.seed)
+
         # Load EMA state_dict
         ema_state_dict = calculate_posthoc_ema(s, os.path.join(args.result_dir, "ema"))
         model.load_state_dict(ema_state_dict)
 
+        # Create sampling noise
+        n = len(class_labels)
+        z = torch.randn(n, train_args["in_channels"], train_args["input_size"], train_args["input_size"], device=device)
         y = torch.tensor(class_labels, device=device)
 
         # Setup CFG
-        z = torch.cat([z_og, z_og], 0)
+        z = torch.cat([z, z], 0)
         y_null = torch.tensor([1000] * n, device=device)
         y = torch.cat([y, y_null], 0)
         model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
