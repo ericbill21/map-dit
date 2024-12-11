@@ -24,12 +24,11 @@ def main(args):
     exp_dir = setup_experiment(args.model, args.results_dir)
     logger = create_logger(exp_dir, verbose=args.verbose)
     logger.info(f"using device {device}")
-
     logger.info(f"experiment directory created at {exp_dir}")
 
     # Setup data
     dataset = CustomDataset(args.data_path)
-    loader = DataLoader(dataset, batch_size=int(args.batch_size), num_workers=args.num_workers, shuffle=True, pin_memory=True, drop_last=True)
+    loader = DataLoader(dataset, batch_size=int(args.batch_size), num_workers=args.num_workers, shuffle=True, pin_memory=True)
     logger.info(f"dataset contains {len(dataset):,} data points ({args.data_path}, {dataset.channels}x{dataset.data_size}x{dataset.data_size})")
 
     # Save arguments
@@ -42,19 +41,24 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="")
 
     model = get_model(args).to(device)
-    model = torch.compile(model, mode="reduce-overhead", fullgraph=True, dynamic=False, disable=args.disable_compile)
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
-    # Setup EMA for the model
-    if args.ema_snapshot_every is None: args.ema_snapshot_every = args.num_steps // 250 # 250 snapshots in total
-    ema = EMA(model, results_dir=exp_dir, stds=[0.01, 0.05, 0.1])
+    # Setup EMA for the model (default: 250 snapshots)
+    if args.ema_snapshot_every is None:
+        args.ema_snapshot_every = args.num_steps // 250
+
+    ema = EMA(model, results_dir=exp_dir, stds=[0.01, 0.05])
 
     # Optimizer
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0)
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.99))
 
     # Setup learning rate scheduler 
-    if args.num_lin_warmup is None: args.num_lin_warmup = args.num_steps // 150 # 1/150 of the total number of steps
-    if args.start_decay is None:    args.start_decay = args.num_steps // 10     # 1/10 of the total number of steps
+    if args.num_lin_warmup is None:
+        args.num_lin_warmup = args.num_steps // 150
+
+    if args.start_decay is None:
+        args.start_decay = args.num_steps // 10
+
     scheduler = LambdaLR(opt, create_lr_lambda(args.num_lin_warmup, args.start_decay))
 
     # Important! (This enables embedding dropout for CFG)
@@ -62,32 +66,36 @@ def main(args):
 
     # Variables for monitoring/logging purposes
     train_steps = 0
+    epochs = 0
     log_steps = 0
     running_loss = 0
     start_time = time()
     
-    num_epochs = args.num_steps // len(loader)
-    logger.info(f"training for {num_epochs} epochs...")
+    logger.info(f"training for {args.num_steps} steps...")
 
-    for epoch in range(num_epochs):
-        logger.info(f"beginning epoch {epoch}...")
+    while train_steps < args.num_steps:
+        logger.info(f"beginning epoch {epochs}...")
 
         for x, y in loader:
-            x = x.to(device)
-            y = y.to(device)
+            # Push data to GPU
+            x, y = x.to(device), y.to(device)
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y)
 
+            # Compute loss
             loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
             loss = loss_dict["loss"].mean()
+
+            # Update weights
             opt.zero_grad()
             loss.backward()
             opt.step()
 
+            # Update EMA
             scheduler.step()
             ema.update(t=train_steps, t_delta=args.batch_size)
 
-            # Log loss values
+            # Logging
             running_loss += loss.item()
             log_steps += 1
             train_steps += 1
@@ -114,15 +122,16 @@ def main(args):
                     "opt": opt.state_dict(),
                 }
 
+                logger.info(f"saving checkpoint to {checkpoint_path} at step {train_steps}...")
                 checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
                 torch.save(checkpoint, checkpoint_path)
-      
-                logger.info(f"saved checkpoint to {checkpoint_path} at step {train_steps:07d}")
-            
+
             # Save EMA snapshot
-            if args.ema_snapshot_every != 0 and train_steps % args.ema_snapshot_every == 0 and train_steps > 0:
+            if train_steps % args.ema_snapshot_every == 0 and args.ema_snapshot_every != 0 and train_steps > 0:
+                logger.info(f"saving ema snapshot to {ema.results_dir} at step {train_steps}...")
                 ema.save_snapshot(train_steps)
-                logger.info(f"saved EMA snapshot to {ema.results_dir} at step {train_steps:07d}")
+
+        epochs += 1
     
     logger.info("done!")
 
@@ -133,6 +142,7 @@ class CustomDataset(Dataset):
         self.labels = torch.load(os.path.join(data_path, "labels.pt"), weights_only=True)
         self.stats = torch.load(os.path.join(data_path, "stats.pt"), weights_only=True)
 
+        # If uint8, the data are images. If float, the data are latents.
         if self.features.dtype == torch.uint8:
             self.transform = transforms.Compose([
                 transforms.RandomHorizontalFlip(),
@@ -140,9 +150,11 @@ class CustomDataset(Dataset):
                 transforms.Normalize(self.stats["mean"], self.stats["std"])
             ])
         else:
-            self.transform = transforms.Compose([
-                transforms.Normalize(self.stats["mean"], self.stats["std"])
-            ])
+            # Normalize data
+            mean = self.stats["mean"][None, :, None, None]
+            std = self.stats["std"][None, :, None, None]
+            self.features = (self.features - mean) / std
+            self.transform = lambda x: x
 
         assert self.features.shape[0] == self.labels.shape[0]
         assert self.features.shape[2] == self.features.shape[3]
@@ -236,7 +248,6 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
-    parser.add_argument("--disable-compile", action="store_true")
 
     # Scheduler
     parser.add_argument("--num-lin-warmup", type=int, default=None, help="Number of steps for linear warmup of the learning rate")
