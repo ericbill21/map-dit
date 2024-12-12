@@ -30,14 +30,14 @@ def gamma_to_std(gammas):
     return np.sqrt((gamma + 1) / (np.square(gamma + 2) * (gamma + 3)))
 
 
-def calc_beta(std, t, delta_t):
+def calc_beta(std, t):
     """
     Calculates the beta value for the EMA update. Methods adapted from the paper:
     https://arxiv.org/abs/2312.02696.
     """
 
     gamma = std_to_gamma(np.array(std))
-    return (1 - delta_t / (t + delta_t)) ** (gamma + 1)
+    return (1 - 1 / t) ** (gamma + 1)
 
 
 def p_dot_p(t_a, gamma_a, t_b, gamma_b):
@@ -65,23 +65,23 @@ def solve_weights(t_i, gamma_i, t_r, gamma_r):
     return X
 
 
-def calculate_posthoc_ema(out_std, results_dir, verbose=True):
-    files = [f for f in os.listdir(results_dir) if f.startswith("ema_")]
+def calculate_posthoc_ema(out_std, ema_dir, verbose=True):
+    files = [f for f in os.listdir(ema_dir)]
     assert len(files) > 0, "No EMA snapshots found in the results directory"
-    
-    regex_std = r'(?<=ema_)[0-9]*\.[0-9]+'
-    regex_step = r'_(\d+)\.pt$'
+
+    regex_std = r"[0-9]*\.[0-9]+"
+    regex_step = r"_(\d+)\.pt$"
 
     in_stds, in_ts, state_dicts_paths = [], [], []
-    for file in os.listdir(results_dir):
+    for file in os.listdir(ema_dir):
         match_std = re.search(regex_std, file)
         match_step = re.search(regex_step, file)
-        
+
         if match_std and match_step:
             in_stds.append(float(match_std.group(0)))
             in_ts.append(int(match_step.group(1)))
             state_dicts_paths.append(file)
-    
+
     # Convert to numpy arrays
     in_stds = np.array(in_stds)
     in_gammas = std_to_gamma(in_stds)
@@ -94,19 +94,19 @@ def calculate_posthoc_ema(out_std, results_dir, verbose=True):
         idx = np.argmax((out_std == in_stds) & (out_ts == in_ts))
         
         # Convert the state_dict to float32
-        snapshot = torch.load(os.path.join(results_dir, state_dicts_paths[idx]), weights_only=True)
-        return { k : v.float() for k, v in snapshot["state_dict"].items() }
-    
+        snapshot = torch.load(os.path.join(ema_dir, state_dicts_paths[idx]), weights_only=True)
+        return snapshot["state_dict"]
+
     # Solve linear system
     weights = solve_weights(in_ts, in_gammas, out_ts, out_gamma).flatten()
 
     # Create the EMA state_dict
-    example = torch.load(os.path.join(results_dir, state_dicts_paths[0]), weights_only=True)
-    res = { k : torch.zeros_like(v, dtype=torch.float32) for k, v in example["state_dict"].items() }
+    example = torch.load(os.path.join(ema_dir, state_dicts_paths[0]), weights_only=True)
+    res = { k: torch.zeros_like(v, dtype=torch.float32) for k, v in example["state_dict"].items() }
 
     # Calculate the EMA state_dict
-    for w, file in tqdm(zip(weights, state_dicts_paths), desc="Calculating EMA state_dict", total=len(weights), disable=not verbose):
-        sd = torch.load(os.path.join(results_dir, file), weights_only=True)["state_dict"]
+    for w, file in tqdm(zip(weights, state_dicts_paths), desc=f"computing ema state_dict (std={out_std})", total=len(weights), disable=not verbose):
+        sd = torch.load(os.path.join(ema_dir, file), weights_only=True)["state_dict"]
 
         for key in res.keys():
             res[key] += sd[key].float() * w
@@ -118,40 +118,38 @@ class EMA():
     @torch.no_grad()
     def __init__(self, net, results_dir, stds=[0.05, 0.1]):
         # Stores a reference to the model
-        self.net = net
-        self.emas = { s: copy.deepcopy(net) for s in stds }
-
-        # Create the results directory to store the EMA models
-        self.results_dir = os.path.join(results_dir, "ema")
-        os.makedirs(self.results_dir, exist_ok=True)
+        self.emas = { s: copy.deepcopy(net).eval().requires_grad_(False) for s in stds }
+        self.ema_dir = os.path.join(results_dir, "ema")
+        os.makedirs(self.ema_dir, exist_ok=True)
 
     @torch.no_grad()
-    def update(self, t, t_delta):
-        """ Updates the EMA parameters
+    def update(self, t, model):
+        """Updates the EMA parameters.
 
-            Args:
-                t: the current time step
-                t_delta: the time step delta, i.e. the batch size
+        Args:
+            t: The current time step.
+            model: The model to update the EMA parameters with.
+
         """
 
         for std, ema in self.emas.items():
-            beta = calc_beta(std, t, t_delta)
+            beta = calc_beta(std, t)
 
-            for ema_p, net_p in zip(ema.parameters(), self.net.parameters()):
-                ema_p.lerp_(net_p, 1 - beta) # ema_p = ema_p * (1 - beta) + net_p * beta
+            for name, param in ema.named_parameters():
+                # ema_p = ema_p * (1 - beta) + model_p * beta
+                param.lerp_(model.get_parameter(name), beta)
 
     @torch.no_grad()
     def save_snapshot(self, t):
-        """ Saves the EMA models to disk at the current time step t
+        """Saves the EMA models to disk at the current time step t.
 
-            Args:
-                t: the current time step
+        Args:
+            t: The current time step.
+
         """
 
         for std, ema in self.emas.items():
-            res = {
-                "std"        : std,
-                "t"          : t,
-                "state_dict" : { k : v.half() for k, v in ema.state_dict().items() } # Save the model in float16
-            }
-            torch.save(res, os.path.join(self.results_dir, f"ema_{std:.3f}_{t:07d}.pt"))        
+            torch.save(
+                { "std": std, "t": t, "state_dict": copy.deepcopy(ema).cpu().half().state_dict() },
+                os.path.join(self.ema_dir, f"{std:.3f}_{t:07d}.pt"),
+            )

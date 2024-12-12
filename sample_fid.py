@@ -24,17 +24,15 @@ def main(args):
 
     # Load model
     model = get_model(train_args).to(device)
-    model = torch.compile(model, mode="reduce-overhead", fullgraph=True, disable=train_args["disable_compile"])
 
     if args.ckpt is not None:
         # For debugging purposes, load a specific checkpoint instead of EMA
-        state_dict = torch.load(os.path.join(args.result_dir, "checkpoints", f"{args.ckpt}.pt"), map_location=device, weights_only=True)
-        model.load_state_dict(state_dict["model"])
+        state_dict = torch.load(os.path.join(args.result_dir, "checkpoints", f"{args.ckpt}.pt"), map_location=device, weights_only=True)["model"]
     else:
         # Load EMA state_dict
-        ema_state_dict = calculate_posthoc_ema(args.ema_std, os.path.join(args.result_dir, "ema"))
-        model.load_state_dict(ema_state_dict)
+        state_dict = calculate_posthoc_ema(args.ema_std, os.path.join(args.result_dir, "ema"))
 
+    model.load_state_dict(state_dict)
     model.eval()
 
     # Setup VAE

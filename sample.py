@@ -22,17 +22,15 @@ def main(args):
 
     # Load model
     model = get_model(train_args).to(device)
-    model = torch.compile(model, mode="reduce-overhead", fullgraph=True, disable=train_args["disable_compile"])
 
     if args.ckpt is not None:
         # For debugging purposes, load a specific checkpoint instead of EMA
-        state_dict = torch.load(os.path.join(args.result_dir, "checkpoints", f"{args.ckpt}.pt"), map_location=device, weights_only=True)
-        model.load_state_dict(state_dict["model"])
+        state_dict = torch.load(os.path.join(args.result_dir, "checkpoints", f"{args.ckpt}.pt"), map_location=device, weights_only=True)["model"]
     else:
         # Load EMA state_dict
-        ema_state_dict = calculate_posthoc_ema(args.ema_std, os.path.join(args.result_dir, "ema"), verbose=True)
-        model.load_state_dict(ema_state_dict)
+        state_dict = calculate_posthoc_ema(args.ema_std, os.path.join(args.result_dir, "ema"), verbose=True)
 
+    model.load_state_dict(state_dict)
     model.eval()
 
     # Labels to condition the model on
@@ -44,9 +42,9 @@ def main(args):
     y = torch.tensor(class_labels, device=device)
 
     # Setup CFG
-    z = torch.cat([z, z], 0)
+    z = torch.cat([z, z], dim=0)
     y_null = torch.tensor([1000] * n, device=device)
-    y = torch.cat([y, y_null], 0)
+    y = torch.cat([y, y_null], dim=0)
     model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
 
     # Sample images

@@ -19,21 +19,20 @@ def main(args):
 
     # Load model
     model = get_model(train_args).to(device)
-    model = torch.compile(model, mode="reduce-overhead", fullgraph=True, disable=train_args["disable_compile"])
     model.eval()
 
     # Labels to condition the model on
-    ema_stds = [0.001, 0.01, 0.05, 0.1, 0.15, 0.2]
+    ema_stds = [0.0075, 0.01, 0.05, 0.1, 0.15]
     class_labels = [args.class_label] * 8
 
     res = []
-    for s in ema_stds:
+    for std in ema_stds:
         if args.seed is not None:
             torch.manual_seed(args.seed)
 
         # Load EMA state_dict
-        ema_state_dict = calculate_posthoc_ema(s, os.path.join(args.result_dir, "ema"))
-        model.load_state_dict(ema_state_dict)
+        state_dict = calculate_posthoc_ema(std, os.path.join(args.result_dir, "ema"))
+        model.load_state_dict(state_dict)
 
         # Create sampling noise
         n = len(class_labels)
@@ -59,10 +58,10 @@ def main(args):
         )
         # Remove null class samples
         samples, _ = samples.chunk(2, dim=0)
-
         res.append(samples)
     
-    samples = torch.cat(res, 0)
+    samples = torch.stack(res, dim=1)
+    samples = samples.view(-1, *samples.shape[2:])
 
     # Denormalize samples
     stats = torch.load(os.path.join(train_args["data_path"], "stats.pt"), weights_only=True)

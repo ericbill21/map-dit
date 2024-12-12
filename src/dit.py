@@ -68,10 +68,11 @@ class DiT(nn.Module):
             use_mp_embedding=use_mp_residual,
         )
 
-        self.pos_embed = nn.Parameter(
+        self.register_buffer(
+            "pos_embed",
             torch.from_numpy(get_2d_sincos_pos_embed(hidden_size, input_size // patch_size)).float().unsqueeze(0),
-            requires_grad=False,
         )
+
         # Normalize positional embedding to standard variance
         if use_mp_pos_enc:
             self.pos_embed.copy_(normalize(self.pos_embed))

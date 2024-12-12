@@ -23,7 +23,9 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = in_dim // num_heads
 
-        self.qkv = MPLinear(in_dim, 3 * in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
+        self.q_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
+        self.k_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
+        self.v_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
         self.out_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
 
         self.scale = 1.0 / math.sqrt(self.head_dim)
@@ -38,7 +40,9 @@ class Attention(nn.Module):
 
         T = x.shape[-2]
 
-        q, k, v = self.qkv(x).chunk(3, dim=-1)                              # (...B, T, D)
+        q = self.q_proj(x)                                                  # (...B, T, D)
+        k = self.k_proj(x)                                                  # (...B, T, D)
+        v = self.v_proj(x)                                                  # (...B, T, D)
 
         q = q.view(-1, T, self.num_heads, self.head_dim).transpose(-3, -2)  # (...B, H, T, D') where D' = D / H
         k = k.view(-1, T, self.num_heads, self.head_dim).transpose(-3, -2)  # (...B, H, T, D')

@@ -25,8 +25,10 @@ class MPLinear(nn.Module):
 
         self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
 
-        if use_wn:
-            self.gain = nn.Parameter(torch.tensor(0. if zero_init else 1.), requires_grad=learn_gain)
+        if use_wn and learn_gain:
+            self.gain = nn.Parameter(torch.tensor(0. if zero_init else 1.))
+        else:
+            self.gain = 1.
 
         if use_wn:
             nn.init.normal_(self.weight)

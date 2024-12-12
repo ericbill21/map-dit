@@ -28,7 +28,7 @@ def main(args):
 
     # Setup data
     dataset = CustomDataset(args.data_path)
-    loader = DataLoader(dataset, batch_size=int(args.batch_size), num_workers=args.num_workers, shuffle=True, pin_memory=True)
+    loader = DataLoader(dataset, batch_size=int(args.batch_size), num_workers=args.num_workers, shuffle=True, pin_memory=True, drop_last=True)
     logger.info(f"dataset contains {len(dataset):,} data points ({args.data_path}, {dataset.channels}x{dataset.data_size}x{dataset.data_size})")
 
     # Save arguments
@@ -47,7 +47,7 @@ def main(args):
     if args.ema_snapshot_every is None:
         args.ema_snapshot_every = args.num_steps // 250
 
-    ema = EMA(model, results_dir=exp_dir, stds=[0.01, 0.05])
+    ema = EMA(model, results_dir=exp_dir, stds=[0.05, 0.1])
 
     # Optimizer
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.99))
@@ -91,14 +91,15 @@ def main(args):
             loss.backward()
             opt.step()
 
-            # Update EMA
-            scheduler.step()
-            ema.update(t=train_steps, t_delta=args.batch_size)
-
             # Logging
             running_loss += loss.item()
             log_steps += 1
             train_steps += 1
+
+            # Update EMA
+            scheduler.step()
+            ema.update(train_steps, model)
+
             if train_steps % args.log_every == 0:
                 # Measure training speed
                 end_time = time()
