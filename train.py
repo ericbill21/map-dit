@@ -34,6 +34,8 @@ def main(args):
     # Save arguments
     args.in_channels = dataset.channels
     args.input_size = dataset.data_size
+    args.stats_std = [float(x) for x in dataset.stats["std"]]
+    args.stats_mean = [float(x) for x in dataset.stats["mean"]]
     with open(os.path.join(exp_dir, "config.yaml"), "w") as f:
         yaml.dump(vars(args), f)
 
@@ -129,7 +131,7 @@ def main(args):
 
             # Save EMA snapshot
             if train_steps % args.ema_snapshot_every == 0 and args.ema_snapshot_every != 0 and train_steps > 0:
-                logger.info(f"saving ema snapshot to {ema.results_dir} at step {train_steps}...")
+                logger.info(f"saving ema snapshot to {ema.ema_dir} at step {train_steps}...")
                 ema.save_snapshot(train_steps)
 
         epochs += 1

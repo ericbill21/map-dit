@@ -62,9 +62,8 @@ def main(args):
     samples, _ = samples.chunk(2, dim=0)
 
     # Denormalize samples
-    stats = torch.load(os.path.join(train_args["data_path"], "stats.pt"), weights_only=True)
-    mean = stats["mean"][None, :, None, None].to(device)
-    std = stats["std"][None, :, None, None].to(device)
+    mean = torch.tensor(train_args["stats_mean"]).reshape(1, -1, 1, 1).to(device)
+    std = torch.tensor(train_args["stats_std"]).reshape(1, -1, 1, 1).to(device)
     samples = samples * std + mean
 
     # Load VAE
