@@ -122,7 +122,7 @@ def main(args):
             if train_steps % args.ckpt_every == 0 and train_steps > 0:
                 checkpoint = {
                     "model": copy.deepcopy(model).cpu().state_dict(),
-                    "opt": copy.deepcopy(opt).cpu().state_dict(),
+                    "opt": copy.deepcopy(opt).state_dict(),
                 }
 
                 checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
