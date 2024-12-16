@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+
 from src.basic.mp_linear import MPLinear
 from src.blocks.dit_block import DiTBlock
 from src.blocks.label_embedder import LabelEmbedder
@@ -29,8 +30,7 @@ class DiT(nn.Module):
         use_forced_weight_normalization: bool=False,
         use_mp_residual: bool=False,
         use_mp_silu: bool=False,
-        use_fourier: bool=False,
-        use_mp_fourier: bool=False,
+        use_mp_embedding: bool=False,
         use_no_layernorm: bool=False,
         use_mp_pos_enc: bool=False,
     ):
@@ -56,14 +56,13 @@ class DiT(nn.Module):
             use_wn=use_weight_normalization,
             use_forced_wn=use_forced_weight_normalization,
             use_mp_silu=use_mp_silu,
-            use_fourier=use_fourier,
-            use_mp_fourier=use_mp_fourier,
+            use_mp_embedding=use_mp_embedding,
         )
         self.y_embedder = LabelEmbedder(
             num_classes,
             hidden_size,
             class_dropout_prob,
-            use_mp_embedding=use_mp_residual,
+            use_mp_embedding=use_mp_embedding,
         )
 
         pos_embed = torch.from_numpy(get_2d_sincos_pos_embed(hidden_size, input_size // patch_size)).float().unsqueeze(0)

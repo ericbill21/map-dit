@@ -251,8 +251,7 @@ if __name__ == "__main__":
     parser.add_argument("--use-mp-silu", action="store_true")
     parser.add_argument("--use-no-layernorm", action="store_true")
     parser.add_argument("--use-mp-pos-enc", action="store_true")
-    parser.add_argument("--use-fourier", action="store_true")
-    parser.add_argument("--use-mp-fourier", action="store_true")
+    parser.add_argument("--use-mp-embedding", action="store_true")
 
     args = parser.parse_args()
     main(args)
