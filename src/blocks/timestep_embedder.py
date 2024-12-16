@@ -4,6 +4,7 @@ import math
 
 from src.layers.mlp import MLP
 from src.basic.mp_fourier import Fourier, MPFourier
+from src.utils import normalize
 
 
 class TimestepEmbedder(nn.Module):
@@ -20,6 +21,8 @@ class TimestepEmbedder(nn.Module):
         frequency_embedding_size: int=256,
     ):
         super().__init__()
+
+        self.use_mp_fourier = use_mp_fourier
 
         self.mlp = MLP(
             frequency_embedding_size,
@@ -61,6 +64,12 @@ class TimestepEmbedder(nn.Module):
         return embedding
 
     def forward(self, t):
-        t_freq = self.embedding(t)
-        t_emb = self.mlp(t_freq)        
+        t_emb = self.mlp(self.embedding(t))
+
+        # The Fourier embedding is far from the independence assumption, so the MLP increases the
+        # magnitude, which results in training instabilities. Since the embeddings are constant per
+        # timestep, we can explicitly normalize them.
+        if self.use_mp_fourier:
+            return normalize(t_emb)
+
         return t_emb

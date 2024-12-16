@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-from torch.utils.checkpoint import checkpoint
-
 from src.basic.mp_linear import MPLinear
 from src.blocks.dit_block import DiTBlock
 from src.blocks.label_embedder import LabelEmbedder
@@ -68,14 +66,13 @@ class DiT(nn.Module):
             use_mp_embedding=use_mp_residual,
         )
 
-        self.register_buffer(
-            "pos_embed",
-            torch.from_numpy(get_2d_sincos_pos_embed(hidden_size, input_size // patch_size)).float().unsqueeze(0),
-        )
+        pos_embed = torch.from_numpy(get_2d_sincos_pos_embed(hidden_size, input_size // patch_size)).float().unsqueeze(0)
 
-        # Normalize positional embedding to standard variance
+        # Normalize positional embedding
         if use_mp_pos_enc:
-            self.pos_embed.copy_(normalize(self.pos_embed))
+            pos_embed = normalize(pos_embed)
+
+        self.register_buffer("pos_embed", pos_embed)
 
         self.blocks = nn.ModuleList([
             DiTBlock(
@@ -134,8 +131,6 @@ class DiT(nn.Module):
             c = t + y
 
         for block in self.blocks:
-            # We removed checkpointing because we do not need it for our purposes
-            # x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)  # (N, T, D)
             x = block(x, c)
 
         x = self.final_layer(x, c)                                              # (N, T, patch_size ** 2 * out_channels)
