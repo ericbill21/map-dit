@@ -25,10 +25,11 @@ class MPLinear(nn.Module):
 
         self.weight = nn.Parameter(torch.empty(out_dim, in_dim))
 
-        if use_wn and learn_gain:
-            self.gain = nn.Parameter(torch.tensor(0. if zero_init else 1.))
-        else:
-            self.gain = 1.
+        if use_wn:
+            if learn_gain:
+                self.gain = nn.Parameter(torch.tensor(0. if zero_init else 1.))
+            else:
+                self.gain = 1.
 
         if use_wn:
             nn.init.normal_(self.weight)
@@ -52,9 +53,8 @@ class MPLinear(nn.Module):
 
         # Traditional weight normalization (makes sure that the gradient is perpendicular to the
         # weights)
+        w = self.weight
         if self.use_wn:
-            w = normalize(self.weight) * (self.gain / math.sqrt(self.in_dim))
-        else:
-            w = self.weight
+            w = normalize(w) * (self.gain / math.sqrt(self.in_dim))
 
         return F.linear(x, w)

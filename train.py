@@ -4,15 +4,15 @@ from torch.optim.lr_scheduler import LambdaLR
 from torchvision import transforms
 from glob import glob
 from time import time
+import copy
 import yaml
 import argparse
-import logging
 import os
 import math
 
 from src.models import DIT_MODELS
 from src.ema import EMA
-from utils import get_model
+from utils import get_model, create_logger
 from diffusion import create_diffusion
 
 
@@ -121,8 +121,8 @@ def main(args):
             # Save checkpoint
             if train_steps % args.ckpt_every == 0 and train_steps > 0:
                 checkpoint = {
-                    "model": model.state_dict(),
-                    "opt": opt.state_dict(),
+                    "model": copy.deepcopy(model).cpu().state_dict(),
+                    "opt": copy.deepcopy(opt).state_dict(),
                 }
 
                 checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
@@ -141,40 +141,37 @@ def main(args):
 
 class CustomDataset(Dataset):
     def __init__(self, data_path: str):
-        self.features = torch.load(os.path.join(data_path, "features.pt"), weights_only=True)
+        self.posterior_means = torch.load(os.path.join(data_path, "posterior_means.pt"), weights_only=True)
+        self.posterior_stds = torch.load(os.path.join(data_path, "posterior_stds.pt"), weights_only=True)
         self.labels = torch.load(os.path.join(data_path, "labels.pt"), weights_only=True)
         self.stats = torch.load(os.path.join(data_path, "stats.pt"), weights_only=True)
 
-        # If uint8, the data are images. If float, the data are latents.
-        if self.features.dtype == torch.uint8:
-            self.transform = transforms.Compose([
-                transforms.RandomHorizontalFlip(),
-                transforms.ConvertImageDtype(torch.float32),
-                transforms.Normalize(self.stats["mean"], self.stats["std"])
-            ])
-        else:
-            # Normalize data
-            mean = self.stats["mean"][None, :, None, None]
-            std = self.stats["std"][None, :, None, None]
-            self.features = (self.features - mean) / std
-            self.transform = lambda x: x
+        mean = self.stats["mean"]
+        std = self.stats["std"]
+        self.transform = transforms.Normalize(mean, std)
 
-        assert self.features.shape[0] == self.labels.shape[0]
-        assert self.features.shape[2] == self.features.shape[3]
+        assert self.posterior_means.shape[0] == self.labels.shape[0] == self.posterior_stds.shape[0]
 
     @property
     def data_size(self):
-        return self.features.shape[2]
+        return self.posterior_means.shape[2]
 
     @property
     def channels(self):
-        return self.features.shape[1]
+        return self.posterior_means.shape[1]
 
     def __len__(self):
-        return self.features.shape[0]
+        return self.posterior_means.shape[0]
 
     def __getitem__(self, idx):
-        return self.transform(self.features[idx]), self.labels[idx]
+        mean = self.posterior_means[idx]
+        std = self.posterior_stds[idx]
+
+        # Sample from latent distribution
+        eps = torch.zeros_like(mean)
+        feature = mean + eps * std
+
+        return self.transform(feature), self.labels[idx]
 
 
 def create_lr_lambda(num_lin_warmup: int, start_decay: int):
@@ -213,19 +210,6 @@ def setup_experiment(model_name: str, results_dir: os.PathLike):
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     return experiment_dir
-
-
-def create_logger(logging_dir, verbose: int=1):
-    verbose_map = {0: logging.WARNING, 1: logging.INFO, 2: logging.DEBUG}
-
-    logging.basicConfig(
-        level=verbose_map.get(verbose, logging.INFO),
-        format="[\033[34m%(asctime)s\033[0m] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[logging.StreamHandler(), logging.FileHandler(os.path.join(logging_dir, "log.txt"))]
-    )
-    logger = logging.getLogger(__name__)
-    return logger
 
 
 def bytes_to_gb(n):
@@ -267,8 +251,7 @@ if __name__ == "__main__":
     parser.add_argument("--use-mp-silu", action="store_true")
     parser.add_argument("--use-no-layernorm", action="store_true")
     parser.add_argument("--use-mp-pos-enc", action="store_true")
-    parser.add_argument("--use-fourier", action="store_true")
-    parser.add_argument("--use-mp-fourier", action="store_true")
+    parser.add_argument("--use-mp-embedding", action="store_true")
 
     args = parser.parse_args()
     main(args)

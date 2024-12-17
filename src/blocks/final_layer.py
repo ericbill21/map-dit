@@ -43,6 +43,4 @@ class FinalLayer(nn.Module):
 
     def forward(self, x, c):
         shift, scale = self.modulation(c)
-        x = modulate(self.norm_final(x), shift, scale)
-        x = self.linear(x)
-        return x
+        return self.linear(modulate(self.norm_final(x), shift, scale))

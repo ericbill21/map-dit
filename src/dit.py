@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torch.utils.checkpoint import checkpoint
 
 from src.basic.mp_linear import MPLinear
 from src.blocks.dit_block import DiTBlock
@@ -31,8 +30,7 @@ class DiT(nn.Module):
         use_forced_weight_normalization: bool=False,
         use_mp_residual: bool=False,
         use_mp_silu: bool=False,
-        use_fourier: bool=False,
-        use_mp_fourier: bool=False,
+        use_mp_embedding: bool=False,
         use_no_layernorm: bool=False,
         use_mp_pos_enc: bool=False,
     ):
@@ -58,24 +56,22 @@ class DiT(nn.Module):
             use_wn=use_weight_normalization,
             use_forced_wn=use_forced_weight_normalization,
             use_mp_silu=use_mp_silu,
-            use_fourier=use_fourier,
-            use_mp_fourier=use_mp_fourier,
+            use_mp_embedding=use_mp_embedding,
         )
         self.y_embedder = LabelEmbedder(
             num_classes,
             hidden_size,
             class_dropout_prob,
-            use_mp_embedding=use_mp_residual,
+            use_mp_embedding=use_mp_embedding,
         )
 
-        self.register_buffer(
-            "pos_embed",
-            torch.from_numpy(get_2d_sincos_pos_embed(hidden_size, input_size // patch_size)).float().unsqueeze(0),
-        )
+        pos_embed = torch.from_numpy(get_2d_sincos_pos_embed(hidden_size, input_size // patch_size)).float().unsqueeze(0)
 
-        # Normalize positional embedding to standard variance
+        # Normalize positional embedding
         if use_mp_pos_enc:
-            self.pos_embed.copy_(normalize(self.pos_embed))
+            pos_embed = normalize(pos_embed)
+
+        self.register_buffer("pos_embed", pos_embed)
 
         self.blocks = nn.ModuleList([
             DiTBlock(
@@ -134,8 +130,6 @@ class DiT(nn.Module):
             c = t + y
 
         for block in self.blocks:
-            # We removed checkpointing because we do not need it for our purposes
-            # x = checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=True)  # (N, T, D)
             x = block(x, c)
 
         x = self.final_layer(x, c)                                              # (N, T, patch_size ** 2 * out_channels)
