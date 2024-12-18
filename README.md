@@ -11,11 +11,11 @@ Below, we present our preliminary results when sampling the **DiT-S/2 model** wi
 
 <div style="display: flex; justify-content: space-between; gap: 20px;">
     <figure style="width: 48%; text-align: center; margin: 0;">
-        <img src="visuals/s_88_mp_ema.png" alt="DiT-S/2 with magnitude preservation" style="width: 100%; border: 1px solid #ddd; border-radius: 4px; padding: 4px;">
+        <img src="visuals/mp_s_88.png" alt="DiT-S/2 with magnitude preservation" style="width: 100%; border: 1px solid #ddd; border-radius: 4px; padding: 4px;">
         <figcaption style="margin-top: 8px;"><b>Fig. 1:</b> DiT-S/2 with magnitude preservation</figcaption>
     </figure>
     <figure style="width: 48%; text-align: center; margin: 0;">
-        <img src="visuals/s_88_nomp_ema.png" alt="DiT-S/2 standard model" style="width: 100%; border: 1px solid #ddd; border-radius: 4px; padding: 4px;">
+        <img src="visuals/nomp_s_88.png" alt="DiT-S/2 standard model" style="width: 100%; border: 1px solid #ddd; border-radius: 4px; padding: 4px;">
         <figcaption style="margin-top: 8px;"><b>Fig. 2:</b> DiT-S/2 (standard model)</figcaption>
     </figure>
 </div>

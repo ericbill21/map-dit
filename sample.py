@@ -34,7 +34,7 @@ def main(args):
     model.eval()
 
     # Labels to condition the model on
-    class_labels = [args.class_label] * 64
+    class_labels = [args.class_label] * 4
 
     # Create sampling noise
     n = len(class_labels)
@@ -74,7 +74,7 @@ def main(args):
     samples = samples.clamp(-1, 1)
 
     # Save and display images
-    save_image(samples, args.output_file, nrow=8, normalize=True, value_range=(-1, 1))
+    save_image(samples, args.output_file, nrow=2, normalize=True, value_range=(-1, 1))
     print(f"output class: {CLS_LOC_MAPPING[args.class_label]} ({args.class_label})")
 
 
