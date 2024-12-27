@@ -121,8 +121,8 @@ def main(args):
             # Save checkpoint
             if train_steps % args.ckpt_every == 0 and train_steps > 0:
                 checkpoint = {
-                    "model": copy.deepcopy(model).cpu().state_dict(),
-                    "opt": copy.deepcopy(opt).state_dict(),
+                    "model": model.state_dict(),
+                    "opt": opt.state_dict(),
                 }
 
                 checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
@@ -168,7 +168,7 @@ class CustomDataset(Dataset):
         std = self.posterior_stds[idx]
 
         # Sample from latent distribution
-        eps = torch.zeros_like(mean)
+        eps = torch.randn_like(mean)
         feature = mean + eps * std
 
         return self.transform(feature), self.labels[idx]
