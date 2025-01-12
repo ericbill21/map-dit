@@ -1,4 +1,6 @@
 # MaP-DiT: Magnitude-Preserving Diffusion Transformer
+## [Paper](https://ericbill21.github.io/MP_in_DiT.pdf)
+
 This project builds upon key concepts from the following research papers:
  - [Peebles & Xie (2023)](https://arxiv.org/abs/2212.09748) explore the application of transformer architectures to diffusion models, achieving state-of-the-art performance on various generation tasks;
  - [Karras et al. (2024)](https://arxiv.org/abs/2312.02696) introduce the idea of preserving the magnitude of features during the diffusion process, enhancing the stability and quality of generated outputs.
