@@ -73,7 +73,7 @@ python sample.py --result-dir /path/to/results/<dir> --class-label <class label>
 ```bibtex
 @misc{bill_jensen_2025,
     title={The Art of Balance: Magnitude Preservation in Diffusion Transformers},
-    author={Eric Tillmann, Bill and Cristian Perez, Jensen},
+    author={Bill, Eric Tillmann and Jensen, Cristian Perez},
     howpublished = {\url{https://github.com/ericbill21/map-dit}},
     year={2025}
 }
