@@ -1,5 +1,5 @@
-# MaP-DiT: Magnitude-Preserving Diffusion Transformer
-## [Paper](https://ericbill21.github.io/MP_in_DiT.pdf)
+# The Art of Balance: Magnitude Preservation in Diffusion Transformers
+## [📝Paper](https://ericbill21.github.io/MP_in_DiT.pdf)
 We extend magnitude-preserving techniques from the EDM2 architecture to Diffusion Transformers (DiT), ensuring stable training by maintaining activation magnitudes and controlling weight growth throughout the architecture. Additionally, we incorporate power function-based exponential moving averages, enabling flexible post-training reconstruction with adjustable decay parameters. Experiments on DiT-XS/2 and DiT-S/4 show significant improvements in FID-10K, highlighting the effectiveness of our approach. Despite increased computational overhead, our methods offer a scalable and modular solution for transformer-based diffusion models.
 
 <p align="center">
@@ -66,4 +66,15 @@ Customize the training process by enabling the following flags:
 
 ```bash
 python sample.py --result-dir /path/to/results/<dir> --class-label <class label>
+```
+
+## Citation
+
+```bibtex
+@misc{bill_jensen_2025,
+    title={The Art of Balance: Magnitude Preservation in Diffusion Transformers},
+    author={Eric Tillmann, Bill and Cristian Perez, Jensen},
+    howpublished = {\url{https://github.com/ericbill21/map-dit}},
+    year={2025}
+}
 ```
