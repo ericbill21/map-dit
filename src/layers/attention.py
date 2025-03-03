@@ -20,16 +20,25 @@ class Attention(nn.Module):
 
         assert in_dim % num_heads == 0
 
+        # attention parameters
         self.use_cosine = use_cosine_attention
         self.num_heads = num_heads
         self.head_dim = in_dim // num_heads
 
-        self.q_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
-        self.k_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
-        self.v_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
+        self.scale = 1.0 / math.sqrt(self.head_dim)
+
+        # attention projections
+        self.in_dim = in_dim
+        self.use_wn = use_wn
+        self.use_forced_wn = use_forced_wn
+
+        self.qkv_weigth = nn.Parameter(torch.empty(3 * in_dim, in_dim))
         self.out_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
 
-        self.scale = 1.0 / math.sqrt(self.head_dim)
+        if use_wn:
+            nn.init.normal_(self.qkv_weigth)
+        else:
+            nn.init.kaiming_uniform_(self.qkv_weigth)
 
     def qkv_normalize(self, w: torch.Tensor, eps=1e-4) -> torch.Tensor:
         # Dividing by norm makes the std of the weights equal to 1/sqrt(in_dim), so we
@@ -50,9 +59,15 @@ class Attention(nn.Module):
 
         T = x.shape[-2]
 
-        q = self.q_proj(x)                                                  # (...B, T, D)
-        k = self.k_proj(x)                                                  # (...B, T, D)
-        v = self.v_proj(x)                                                  # (...B, T, D)
+        if self.training and self.use_forced_wn:
+            with torch.no_grad():
+                self.qkv_weigth.copy_(self.qkv_normalize(self.qkv_weigth))
+
+        qkv_w = self.qkv_weigth
+        if self.use_wn:
+            qkv_w = self.qkv_normalize(qkv_w) / math.sqrt(self.in_dim)
+
+        q, k, v = F.linear(x, qkv_w).chunk(3, dim=-1)                       # 3 * (...B, T, D)
 
         q = q.view(-1, T, self.num_heads, self.head_dim).transpose(-3, -2)  # (...B, H, T, D') where D' = D / H
         k = k.view(-1, T, self.num_heads, self.head_dim).transpose(-3, -2)  # (...B, H, T, D')
