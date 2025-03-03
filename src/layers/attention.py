@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
@@ -29,6 +30,15 @@ class Attention(nn.Module):
         self.out_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
 
         self.scale = 1.0 / math.sqrt(self.head_dim)
+
+    def qkv_normalize(self, w: torch.Tensor, eps=1e-4) -> torch.Tensor:
+        # Dividing by norm makes the std of the weights equal to 1/sqrt(in_dim), so we
+        # multiply by sqrt(in_dim) to compensate
+        # Additionally, we normalize according to query, key, or value, hence the view
+        w_view = w.view(3, self.in_dim, self.in_dim)
+        norm = torch.linalg.vector_norm(w_view, dim=-1, keepdim=True)
+        w = w_view * math.sqrt(self.in_dim) / (norm + eps)
+        return w.reshape(3 * self.in_dim, self.in_dim)
 
     def forward(self, x):
         """
