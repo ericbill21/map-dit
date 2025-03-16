@@ -53,11 +53,48 @@ class DiTBlock(nn.Module):
         )
         self.modulation = AdaLNModulation(hidden_size, 3, use_wn=use_wn, use_forced_wn=use_forced_wn, use_mp_silu=use_mp_silu)
 
-    def forward(self, x, c):
+    def forward(self, x, c, scale, shift):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
+
         if self.use_mp_residual:
-            x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)), t=0.3)
-            x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp)), t=0.3)
+
+            print(f"{x.shape=}")
+            print(f"{shift_msa.shape=}")
+            print(f"{scale_msa.shape=}")
+            print(f"{gate_msa.shape=}")
+            print(f"{scale.shape=}")
+            print(f"{shift.shape=}")
+            input()
+            
+            # Pre Attention
+            scale = scale_msa * scale 
+            shift = scale_msa * shift + shift_msa
+
+            attn_out = self.attn(
+                modulate(self.norm1(x), shift_msa, scale_msa),
+                scale=scale,
+                shift=shift
+            )
+
+            x = mp_sum(x, attn_out, t=0.3)
+
+            # Post Attention
+            scale = gate_msa * scale    
+
+            # Pre MLP
+            scale = scale_mlp * scale
+            shift = scale_mlp * shift + shift_mlp
+
+            mlp_out = self.mlp(
+                modulate(self.norm2(x), shift_mlp, scale_mlp),
+                scale=scale,
+                shift=shift
+            )
+            x = mp_sum(x, gate_mlp.unsqueeze(1) * mlp_out, t=0.3)
+
+            # Post MLP
+            scale = gate_mlp * scale
+
         else:
             x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
             x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))

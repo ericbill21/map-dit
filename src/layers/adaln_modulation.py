@@ -29,4 +29,5 @@ class AdaLNModulation(nn.Module):
         )
 
     def forward(self, x):
+        print("AdaLNModulation")
         return self.net(x).chunk(2 * self.num_modulates, dim=1)

@@ -34,7 +34,10 @@ class TimestepEmbedder(nn.Module):
             self.embedding = SinusoidalEncoding(hidden_size)
 
     def forward(self, t):
-        return self.mlp(self.embedding(t))
+        return self.mlp(self.embedding(t), 
+                        scale=torch.ones_like(t).to(t.device), 
+                        shift=torch.zeros_like(t).to(t.device)
+                        ) 
 
 
 class SinusoidalEncoding(nn.Module):

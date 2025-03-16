@@ -128,9 +128,12 @@ class DiT(nn.Module):
             c = mp_sum(t, y, t=0.5)                                             # (N, D)
         else:
             c = t + y
-
+        
+        N, _, D = x.shape
+        shift = torch.zeros(N, D).to(x.device)
+        scale = torch.ones(N, D).to(x.device)
         for block in self.blocks:
-            x = block(x, c)
+            x, scale, shift = block(x, c, scale, shift)
 
         x = self.final_layer(x, c)                                              # (N, T, patch_size ** 2 * out_channels)
         return unpatchify(x, self.input_size, self.patch_size)

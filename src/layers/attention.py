@@ -49,7 +49,7 @@ class Attention(nn.Module):
         w = w_view * math.sqrt(self.in_dim) / (norm + eps)
         return w.reshape(3 * self.in_dim, self.in_dim)
 
-    def forward(self, x):
+    def forward(self, x, scale, shift):
         """
         Args:
             x: (...B, T, D)
@@ -81,4 +81,4 @@ class Attention(nn.Module):
         out = out.transpose(-3, -2)                                         # (...B, T, H, D')
         out = out.reshape(*x.shape)                                         # (...B, T, D)
 
-        return self.out_proj(out)
+        return self.out_proj(out) #FIXME: scale, shift
