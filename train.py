@@ -252,6 +252,7 @@ if __name__ == "__main__":
     parser.add_argument("--use-no-layernorm", action="store_true")
     parser.add_argument("--use-mp-pos-enc", action="store_true")
     parser.add_argument("--use-mp-embedding", action="store_true")
+    parser.add_argument("--use-no-shift", action="store_true")
 
     args = parser.parse_args()
     main(args)

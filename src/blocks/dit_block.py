@@ -1,10 +1,10 @@
 import torch.nn as nn
+import torch
 
 from src.layers.attention import Attention
 from src.layers.mlp import MLP
 from src.layers.adaln_modulation import AdaLNModulation
 from src.utils import mp_sum, modulate
-
 
 class DiTBlock(nn.Module):
     """A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning."""
@@ -19,6 +19,7 @@ class DiTBlock(nn.Module):
         use_mp_residual: bool,
         use_mp_silu: bool,
         use_no_layernorm: bool,
+        use_no_shift: bool,
         mlp_ratio: float=4.0,
     ):
         super().__init__()
@@ -51,10 +52,26 @@ class DiTBlock(nn.Module):
             use_forced_wn=use_forced_wn,
             use_mp_silu=use_mp_silu,
         )
-        self.modulation = AdaLNModulation(hidden_size, 3, use_wn=use_wn, use_forced_wn=use_forced_wn, use_mp_silu=use_mp_silu)
+
+        self.modulation = AdaLNModulation(
+            hidden_size,
+            2 if use_no_shift else 3,
+            use_wn=use_wn,
+            use_forced_wn=use_forced_wn,
+            use_mp_silu=use_mp_silu
+        )
+        self.use_no_shift = use_no_shift
 
     def forward(self, x, c):
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
+
+        if self.use_no_shift:
+            scale_msa, gate_msa, scale_mlp, gate_mlp = self.modulation(c)
+
+            shift_msa = torch.zeros_like(scale_msa)
+            shift_mlp = torch.zeros_like(scale_mlp)
+        else:
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
+
         if self.use_mp_residual:
             x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)), t=0.3)
             x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp)), t=0.3)

@@ -22,6 +22,7 @@ def get_model(args):
         use_no_layernorm=args["use_no_layernorm"],
         use_mp_pos_enc=args["use_mp_pos_enc"],
         use_mp_embedding=args["use_mp_embedding"],
+        use_no_shift=args["use_no_shift"],
     ) 
 
 

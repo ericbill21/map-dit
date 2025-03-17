@@ -33,6 +33,7 @@ class DiT(nn.Module):
         use_mp_embedding: bool=False,
         use_no_layernorm: bool=False,
         use_mp_pos_enc: bool=False,
+        use_no_shift: bool=False,
     ):
         super().__init__()
 
@@ -84,6 +85,7 @@ class DiT(nn.Module):
                 use_mp_residual=use_mp_residual,
                 use_mp_silu=use_mp_silu,
                 use_no_layernorm=use_no_layernorm,
+                use_no_shift=use_no_shift,
             ) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(
