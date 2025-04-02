@@ -51,8 +51,18 @@ def main(args):
 
     ema = EMA(model, results_dir=exp_dir, stds=[0.05, 0.1])
 
-    # Optimizer
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.99))
+    # Use a higher learningrate for MP components
+    mp_params, gain_params = [], []
+    for name, param in model.named_parameters():
+        if ".gain" in name:
+            gain_params.append(param)
+        else:
+            mp_params.append(param)
+
+    opt = torch.optim.Adam([
+        {"params" : mp_params, "lr" : args.lr, "betas" : (0.9, 0.99)},
+        {"params" : gain_params, "lr" : 1e-4, "betas" : (0.9, 0.99)}
+    ])
 
     # Setup learning rate scheduler 
     if args.num_lin_warmup is None:
