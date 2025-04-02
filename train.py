@@ -52,16 +52,15 @@ def main(args):
     ema = EMA(model, results_dir=exp_dir, stds=[0.05, 0.1])
 
     # Use a higher learningrate for MP components
-    mp_params, gain_params = [], []
-    for name, param in model.named_parameters():
-        if ".gain" in name:
-            gain_params.append(param)
-        else:
-            mp_params.append(param)
+    is_mp = lambda name: not any(x in name for x in ["gain", ".blend"])
+    mp_params = [param for name, param in model.named_parameters() if is_mp(name)]
+    no_mp_params = [param for name, param in model.named_parameters() if not is_mp(name)]
+
+    print(f"MP params: {len(mp_params)}, Gain params: {len(no_mp_params)}")
 
     opt = torch.optim.Adam([
         {"params" : mp_params, "lr" : args.lr, "betas" : (0.9, 0.99)},
-        {"params" : gain_params, "lr" : 1e-4, "betas" : (0.9, 0.99)}
+        {"params" : no_mp_params, "lr" : 1e-4, "betas" : (0.9, 0.99)}
     ])
 
     # Setup learning rate scheduler 
@@ -263,6 +262,7 @@ if __name__ == "__main__":
     parser.add_argument("--use-mp-pos-enc", action="store_true")
     parser.add_argument("--use-mp-embedding", action="store_true")
     parser.add_argument("--use-no-shift", action="store_true")
+    parser.add_argument("--learn-blending", action="store_true")
 
     args = parser.parse_args()
     main(args)

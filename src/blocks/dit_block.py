@@ -20,6 +20,7 @@ class DiTBlock(nn.Module):
         use_mp_silu: bool,
         use_no_layernorm: bool,
         use_no_shift: bool,
+        learn_blending: bool,
         mlp_ratio: float=4.0,
     ):
         super().__init__()
@@ -62,6 +63,14 @@ class DiTBlock(nn.Module):
         )
         self.use_no_shift = use_no_shift
 
+        # Learning 
+        if learn_blending:
+            self.blend_factor_msa = nn.Parameter(torch.tensor(0.5))
+            self.blend_factor_mlp = nn.Parameter(torch.tensor(0.5))
+        else:
+            self.blend_factor_msa = 0.3
+            self.blend_factor_mlp = 0.3
+
     def forward(self, x, c):
 
         if self.use_no_shift:
@@ -73,8 +82,8 @@ class DiTBlock(nn.Module):
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
 
         if self.use_mp_residual:
-            x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)), t=0.3)
-            x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp)), t=0.3)
+            x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)), t=self.blend_factor_msa)
+            x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp)), t=self.blend_factor_mlp)
         else:
             x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
             x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))

@@ -3,7 +3,6 @@ import torch.nn as nn
 from src.basic.mp_linear import MPLinear
 from src.basic.mp_silu import MPSiLU
 
-
 class MLP(nn.Module):
     def __init__(
         self,
