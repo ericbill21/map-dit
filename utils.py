@@ -1,7 +1,7 @@
-from argparse import Namespace
-from typing import Optional
 import logging
 import os
+from argparse import Namespace
+from typing import Optional
 
 from src.models import DIT_MODELS
 
@@ -22,6 +22,7 @@ def get_model(args):
         use_no_layernorm=args["use_no_layernorm"],
         use_mp_pos_enc=args["use_mp_pos_enc"],
         use_mp_embedding=args["use_mp_embedding"],
+        use_rotation_modulation=args["use_rotation_modulation"],
     ) 
 
 

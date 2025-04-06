@@ -1,9 +1,10 @@
 import torch.nn as nn
 
+from src.layers.adaln_modulation import AdaLNModulation
 from src.layers.attention import Attention
 from src.layers.mlp import MLP
-from src.layers.adaln_modulation import AdaLNModulation
-from src.utils import mp_sum, modulate
+from src.layers.rotation_modulation import RotationModulation
+from src.utils import modulate, mp_sum
 
 
 class DiTBlock(nn.Module):
@@ -19,6 +20,7 @@ class DiTBlock(nn.Module):
         use_mp_residual: bool,
         use_mp_silu: bool,
         use_no_layernorm: bool,
+        use_rotation_modulation: bool,
         mlp_ratio: float=4.0,
     ):
         super().__init__()
@@ -51,9 +53,32 @@ class DiTBlock(nn.Module):
             use_forced_wn=use_forced_wn,
             use_mp_silu=use_mp_silu,
         )
-        self.modulation = AdaLNModulation(hidden_size, 3, use_wn=use_wn, use_forced_wn=use_forced_wn, use_mp_silu=use_mp_silu)
+        
+        self.use_rot_mod = use_rotation_modulation
+        if use_rotation_modulation:
+            self.mod1 = RotationModulation(hidden_size, 32, hidden_size)
+            self.mod2 = RotationModulation(hidden_size, 32, hidden_size)
+        else:
+            self.modulation = AdaLNModulation(hidden_size, 3, use_wn=use_wn, use_forced_wn=use_forced_wn, use_mp_silu=use_mp_silu)
 
     def forward(self, x, c):
+        # Rotation modulation
+        from src.utils import magnitude
+
+        if self.use_rot_mod:
+            if self.use_mp_residual:
+                print(1, magnitude(x))
+                x = mp_sum(x, self.attn(self.mod1(x, c)), t=0.3)
+                print(2, magnitude(x))
+                x = mp_sum(x, self.mlp(self.mod2(x, c)), t=0.3)
+                print(3, magnitude(x))
+            else:
+                x = x + self.attn(self.mod1(x, c))
+                x = x + self.mlp(self.mod2(x, c))
+
+            return x
+
+        # Scale, shift, gate modulation
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
         if self.use_mp_residual:
             x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)), t=0.3)

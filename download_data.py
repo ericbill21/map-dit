@@ -1,12 +1,14 @@
-import torch
-from torchvision import transforms
-from datasets import load_dataset
-from diffusers.models import AutoencoderKL
-from tqdm import tqdm
 import argparse
 import os
 
+import torch
+from datasets import load_dataset
+from diffusers.models import AutoencoderKL
+from torchvision import transforms
+from tqdm import tqdm
+
 from utils import create_logger
+
 
 def main(args):
     torch.set_grad_enabled(False)

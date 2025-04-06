@@ -3,11 +3,11 @@ import torch.nn as nn
 
 from src.basic.mp_linear import MPLinear
 from src.blocks.dit_block import DiTBlock
+from src.blocks.final_layer import FinalLayer
 from src.blocks.label_embedder import LabelEmbedder
 from src.blocks.timestep_embedder import TimestepEmbedder
-from src.blocks.final_layer import FinalLayer
 from src.pos_embed import get_2d_sincos_pos_embed
-from src.utils import mp_sum, patchify, unpatchify, normalize
+from src.utils import mp_sum, normalize, patchify, unpatchify
 
 
 class DiT(nn.Module):
@@ -33,6 +33,7 @@ class DiT(nn.Module):
         use_mp_embedding: bool=False,
         use_no_layernorm: bool=False,
         use_mp_pos_enc: bool=False,
+        use_rotation_modulation: bool=False,
     ):
         super().__init__()
 
@@ -84,6 +85,7 @@ class DiT(nn.Module):
                 use_mp_residual=use_mp_residual,
                 use_mp_silu=use_mp_silu,
                 use_no_layernorm=use_no_layernorm,
+                use_rotation_modulation=use_rotation_modulation,
             ) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(

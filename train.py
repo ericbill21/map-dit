@@ -1,19 +1,19 @@
-import torch
-from torch.utils.data import Dataset, DataLoader
-from torch.optim.lr_scheduler import LambdaLR
-from torchvision import transforms
+import argparse
+import math
+import os
 from glob import glob
 from time import time
-import copy
-import yaml
-import argparse
-import os
-import math
 
-from src.models import DIT_MODELS
-from src.ema import EMA
-from utils import get_model, create_logger
+import torch
+import yaml
+from torch.optim.lr_scheduler import LambdaLR
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms
+
 from diffusion import create_diffusion
+from src.ema import EMA
+from src.models import DIT_MODELS
+from utils import create_logger, get_model
 
 
 def main(args):
@@ -252,6 +252,7 @@ if __name__ == "__main__":
     parser.add_argument("--use-no-layernorm", action="store_true")
     parser.add_argument("--use-mp-pos-enc", action="store_true")
     parser.add_argument("--use-mp-embedding", action="store_true")
+    parser.add_argument("--use-rotation-modulation", action="store_true")
 
     args = parser.parse_args()
     main(args)
