@@ -266,7 +266,6 @@ if __name__ == "__main__":
     parser.add_argument("--use-no-layernorm", action="store_true")
     parser.add_argument("--use-mp-pos-enc", action="store_true")
     parser.add_argument("--use-mp-embedding", action="store_true")
-
     parser.add_argument("--use-all-mp", action="store_true")
 
     # New stuff
@@ -279,6 +278,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.use_all_mp:
+        args.use_cosine_attention = True
+        args.use_weight_normalization = True
+        args.use_forced_weight_normalization = True
         args.use_mp_residual = True
         args.use_mp_silu = True
         args.use_no_layernorm = True
