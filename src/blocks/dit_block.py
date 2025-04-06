@@ -22,6 +22,8 @@ class DiTBlock(nn.Module):
         use_no_layernorm: bool,
         use_no_shift: bool,
         learn_blending: bool,
+        use_sigmoid_attn: bool,
+        use_rotation_modulation: bool,
         mlp_ratio: float=4.0,
     ):
         super().__init__()
@@ -39,6 +41,7 @@ class DiTBlock(nn.Module):
             use_cosine_attention=use_cosine_attention,
             use_wn=use_wn,
             use_forced_wn=use_forced_wn,
+            use_sigmoid_attn=use_sigmoid_attn,
         )
 
         if use_no_layernorm:

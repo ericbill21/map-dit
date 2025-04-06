@@ -15,13 +15,20 @@ class Attention(nn.Module):
         use_cosine_attention: bool,
         use_wn: bool,
         use_forced_wn: bool,
+        use_sigmoid_attn: bool,
     ):
         super().__init__()
 
         assert in_dim % num_heads == 0
+        
+        # attention type
+        self.use_cosine = use_cosine_attention
+        self.use_sigmoid_attn = use_sigmoid_attn
+
+        if use_sigmoid_attn and not use_cosine_attention:
+            raise ValueError("Sigmoid attention requires cosine attention.")
 
         # attention parameters
-        self.use_cosine = use_cosine_attention
         self.num_heads = num_heads
         self.head_dim = in_dim // num_heads
 
@@ -57,7 +64,7 @@ class Attention(nn.Module):
         Returns: (...B, T, D)
         """
 
-        T = x.shape[-2]
+        T, D = x.shape[-2:]
 
         if self.training and self.use_forced_wn:
             with torch.no_grad():
@@ -77,7 +84,12 @@ class Attention(nn.Module):
             q = normalize(q)
             k = normalize(k)
 
-        out = F.scaled_dot_product_attention(q, k, v, scale=self.scale)     # (...B, H, T, D')
+        # (...B, H, T, D')
+        if self.use_sigmoid_attn:
+            out = 1.8402 / math.sqrt(T) * F.sigmoid(q @ k.transpose(-2, -1) * self.scale) @ v
+        else:
+            out = F.scaled_dot_product_attention(q, k, v, scale=self.scale)
+        
         out = out.transpose(-3, -2)                                         # (...B, T, H, D')
         out = out.reshape(*x.shape)                                         # (...B, T, D)
 

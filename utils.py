@@ -24,6 +24,8 @@ def get_model(args):
         use_mp_embedding=args["use_mp_embedding"],
         use_no_shift=args["use_no_shift"],
         learn_blending=args["learn_blending"],
+        use_sigmoid_attn=args["sigmoid_attention"],
+        use_rotation_modulation=args["rotation_modulation"],
     ) 
 
 

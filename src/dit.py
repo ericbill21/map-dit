@@ -35,6 +35,8 @@ class DiT(nn.Module):
         use_mp_pos_enc: bool=False,
         use_no_shift: bool=False,
         learn_blending: bool=False,
+        use_sigmoid_attn: bool=False,
+        use_rotation_modulation: bool=False,
     ):
         super().__init__()
 
@@ -88,6 +90,8 @@ class DiT(nn.Module):
                 use_no_layernorm=use_no_layernorm,
                 use_no_shift=use_no_shift,
                 learn_blending=learn_blending,
+                use_sigmoid_attn=use_sigmoid_attn,
+                use_rotation_modulation=use_rotation_modulation,
             ) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(
