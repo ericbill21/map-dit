@@ -51,17 +51,21 @@ def main(args):
 
     ema = EMA(model, results_dir=exp_dir, stds=[0.05, 0.1])
 
-    # Use a higher learningrate for MP components
-    is_mp = lambda name: not any(x in name for x in ["gain", ".blend"])
-    mp_params = [param for name, param in model.named_parameters() if is_mp(name)]
-    no_mp_params = [param for name, param in model.named_parameters() if not is_mp(name)]
+    if args.use_diff_lr:
+        # Use a higher learningrate for MP components
+        is_mp = lambda name: not any(x in name for x in ["gain", ".blend"])
+        mp_params = [param for name, param in model.named_parameters() if is_mp(name)]
+        no_mp_params = [param for name, param in model.named_parameters() if not is_mp(name)]
 
-    print(f"MP params: {len(mp_params)}, Gain params: {len(no_mp_params)}")
+        print(f"MP params: {len(mp_params)}, Gain params: {len(no_mp_params)}")
 
-    opt = torch.optim.Adam([
-        {"params" : mp_params, "lr" : args.lr, "betas" : (0.9, 0.99)},
-        {"params" : no_mp_params, "lr" : 1e-4, "betas" : (0.9, 0.99)}
-    ])
+        opt = torch.optim.Adam([
+            {"params" : mp_params, "lr" : args.lr, "betas" : (0.9, 0.99)},
+            {"params" : no_mp_params, "lr" : 1e-4, "betas" : (0.9, 0.99)}
+        ])
+    
+    else:
+        opt = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.99))
 
     # Setup learning rate scheduler 
     if args.num_lin_warmup is None:
@@ -251,6 +255,7 @@ if __name__ == "__main__":
 
     # EMA
     parser.add_argument("--ema-snapshot-every", type=int, default=None, help="Number of steps to save EMA snapshots")
+    parser.add_argument("--no-ema", action="store_true", help="Do not use EMA")
 
     # Magnitude preserving feature flags
     parser.add_argument("--use-cosine-attention", action="store_true")
@@ -261,8 +266,26 @@ if __name__ == "__main__":
     parser.add_argument("--use-no-layernorm", action="store_true")
     parser.add_argument("--use-mp-pos-enc", action="store_true")
     parser.add_argument("--use-mp-embedding", action="store_true")
-    parser.add_argument("--use-no-shift", action="store_true")
-    parser.add_argument("--learn-blending", action="store_true")
+
+    parser.add_argument("--use-all-mp", action="store_true")
+
+    # New stuff
+    parser.add_argument("--use-no-shift", action="store_true", help="Use no shift in AdaLN")
+    parser.add_argument("--learn-blending", action="store_true", help="Learn residual blending factors")
+    parser.add_argument("--sigmoid-attention", action="store_true", help="Use sigmoid attention instead of softmax")
+    parser.add_argument("--rotation-modulation", action="store_true", help="Use rotation modulation instead of AdaLN")
+    parser.add_argument("--use-diff-lr", action="store_true", help="Use different learning rates for MP and non-MP parameters")
 
     args = parser.parse_args()
+
+    if args.use_all_mp:
+        args.use_mp_residual = True
+        args.use_mp_silu = True
+        args.use_no_layernorm = True
+        args.use_mp_pos_enc = True
+        args.use_mp_embedding = True
+
+    if args.no_ema:
+        args.ema_snapshot_every = args.num_steps + 1
+
     main(args)

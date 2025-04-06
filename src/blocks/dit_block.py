@@ -1,3 +1,4 @@
+import torch.nn.functional as F
 import torch.nn as nn
 import torch
 
@@ -65,11 +66,12 @@ class DiTBlock(nn.Module):
 
         # Learning 
         if learn_blending:
-            self.blend_factor_msa = nn.Parameter(torch.tensor(0.5))
-            self.blend_factor_mlp = nn.Parameter(torch.tensor(0.5))
+            self.blend_factor_msa = nn.Parameter(torch.tensor(0.0))
+            self.blend_factor_mlp = nn.Parameter(torch.tensor(0.0))
         else:
-            self.blend_factor_msa = 0.3
-            self.blend_factor_mlp = 0.3
+            # TODO: Work arround for now, to get a blending factor of 0.3
+            self.blend_factor_msa = -0.8472977876663208
+            self.blend_factor_mlp = -0.8472977876663208
 
     def forward(self, x, c):
 
@@ -82,8 +84,8 @@ class DiTBlock(nn.Module):
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
 
         if self.use_mp_residual:
-            x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)), t=self.blend_factor_msa)
-            x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp)), t=self.blend_factor_mlp)
+            x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)), t=F.sigmoid(self.blend_factor_msa))
+            x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp)), t=F.sigmoid(self.blend_factor_mlp))
         else:
             x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
             x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
