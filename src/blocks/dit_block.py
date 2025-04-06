@@ -73,8 +73,8 @@ class DiTBlock(nn.Module):
             self.blend_factor_mlp = nn.Parameter(torch.tensor(0.0))
         else:
             # TODO: Work arround for now, to get a blending factor of 0.3
-            self.blend_factor_msa = -0.8472977876663208
-            self.blend_factor_mlp = -0.8472977876663208
+            self.blend_factor_msa = torch.tensor(-0.8472977876663208)
+            self.blend_factor_mlp = torch.tensor(-0.8472977876663208)
 
     def forward(self, x, c):
 
