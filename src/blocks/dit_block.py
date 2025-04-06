@@ -63,15 +63,10 @@ class DiTBlock(nn.Module):
 
     def forward(self, x, c):
         # Rotation modulation
-        from src.utils import magnitude
-
         if self.use_rot_mod:
             if self.use_mp_residual:
-                print(1, magnitude(x))
                 x = mp_sum(x, self.attn(self.mod1(x, c)), t=0.3)
-                print(2, magnitude(x))
                 x = mp_sum(x, self.mlp(self.mod2(x, c)), t=0.3)
-                print(3, magnitude(x))
             else:
                 x = x + self.attn(self.mod1(x, c))
                 x = x + self.mlp(self.mod2(x, c))

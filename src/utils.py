@@ -1,6 +1,7 @@
-import torch
-import einops
 import math
+
+import einops
+import torch
 
 
 def magnitude(x: torch.Tensor) -> torch.Tensor:
@@ -21,11 +22,6 @@ def normalize(x: torch.Tensor, eps=1e-4) -> torch.Tensor:
     # multiply by sqrt(in_dim) to compensate
     norm = torch.linalg.vector_norm(x, dim=-1, keepdim=True)
     return x * math.sqrt(x.shape[-1]) / (norm + eps)
-
-
-def magnitude(x: torch.Tensor) -> torch.Tensor:
-    """Computes the mean magnitude."""
-    return x.square().mean(-1).sqrt().mean()
 
 
 def patchify(x: torch.Tensor, patch_size: int) -> torch.Tensor:
