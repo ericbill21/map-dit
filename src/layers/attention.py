@@ -93,7 +93,7 @@ class Attention(nn.Module):
             out = F.scaled_dot_product_attention(q, k, v, scale=self.scale)
 
         if self.force_magnitude:
-            out = magnitude(x) * normalize(out)
+            out = x.square().mean(-1, keepdim=True).sqrt() * normalize(out)
         
         out = out.transpose(-3, -2)                                         # (...B, T, H, D')
         out = out.reshape(*x.shape)                                         # (...B, T, D)
