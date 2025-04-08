@@ -43,6 +43,10 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="")
 
     model = get_model(args).to(device)
+    if args.compile:
+        logger.info("compiling model...")
+        model = torch.compile(model)
+
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     # Setup EMA for the model (default: 250 snapshots)
@@ -57,7 +61,7 @@ def main(args):
         mp_params = [param for name, param in model.named_parameters() if is_mp(name)]
         no_mp_params = [param for name, param in model.named_parameters() if not is_mp(name)]
 
-        print(f"MP params: {len(mp_params)}, Gain params: {len(no_mp_params)}")
+        logger.info(f"MP params: {len(mp_params)}, Gain params: {len(no_mp_params)}")
 
         opt = torch.optim.Adam([
             {"params" : mp_params, "lr" : args.lr, "betas" : (0.9, 0.99)},
@@ -275,6 +279,7 @@ if __name__ == "__main__":
     parser.add_argument("--rotation-modulation", action="store_true", help="Use rotation modulation instead of AdaLN")
     parser.add_argument("--use-diff-lr", action="store_true", help="Use different learning rates for MP and non-MP parameters")
     parser.add_argument("--force-magnitude", action="store_true", help="Force magnitude in attention layer")
+    parser.add_argument("--compile", action="store_true", help="Compile the model with torch.compile")
 
     args = parser.parse_args()
 

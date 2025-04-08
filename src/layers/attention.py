@@ -91,11 +91,11 @@ class Attention(nn.Module):
             out = 1.8402 / math.sqrt(T) * F.sigmoid(q @ k.transpose(-2, -1) * self.scale) @ v
         else:
             out = F.scaled_dot_product_attention(q, k, v, scale=self.scale)
+       
+        out = out.transpose(-3, -2)                                         # (...B, T, H, D')
+        out = out.reshape(*x.shape)                                         # (...B, T, D)
 
         if self.force_magnitude:
             out = x.square().mean(-1, keepdim=True).sqrt() * normalize(out)
-        
-        out = out.transpose(-3, -2)                                         # (...B, T, H, D')
-        out = out.reshape(*x.shape)                                         # (...B, T, D)
 
         return self.out_proj(out)
