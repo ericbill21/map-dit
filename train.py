@@ -274,7 +274,7 @@ if __name__ == "__main__":
     parser.add_argument("--sigmoid-attention", action="store_true", help="Use sigmoid attention instead of softmax")
     parser.add_argument("--rotation-modulation", action="store_true", help="Use rotation modulation instead of AdaLN")
     parser.add_argument("--use-diff-lr", action="store_true", help="Use different learning rates for MP and non-MP parameters")
-    parser.add_argument("--force-magnitude" action="store_true", help="Force magnitude in attention layer")
+    parser.add_argument("--force-magnitude", action="store_true", help="Force magnitude in attention layer")
 
     args = parser.parse_args()
 
