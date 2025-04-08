@@ -93,6 +93,7 @@ class DiT(nn.Module):
                 learn_blending=learn_blending,
                 use_sigmoid_attn=use_sigmoid_attn,
                 use_rotation_modulation=use_rotation_modulation,
+                force_magnitude=force_magnitude,
             ) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(
@@ -138,7 +139,7 @@ class DiT(nn.Module):
         else:
             c = t + y
 
-        for block in enumerate(self.blocks):
+        for block in self.blocks:
             x = block(x, c)
 
         x = self.final_layer(x, c)                                              # (N, T, patch_size ** 2 * out_channels)

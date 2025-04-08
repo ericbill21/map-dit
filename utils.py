@@ -26,6 +26,7 @@ def get_model(args):
         learn_blending=args["learn_blending"],
         use_sigmoid_attn=args["sigmoid_attention"],
         use_rotation_modulation=args["rotation_modulation"],
+        force_magnitude=args["force_magnitude"],
     ) 
 
 
