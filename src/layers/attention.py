@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import math
 
 from src.basic.mp_linear import MPLinear
-from src.utils import normalize
+from src.utils import normalize, magnitude
 
 
 class Attention(nn.Module):
@@ -16,6 +16,7 @@ class Attention(nn.Module):
         use_wn: bool,
         use_forced_wn: bool,
         use_sigmoid_attn: bool,
+        force_magnitude: bool,
     ):
         super().__init__()
 
@@ -24,6 +25,7 @@ class Attention(nn.Module):
         # attention type
         self.use_cosine = use_cosine_attention
         self.use_sigmoid_attn = use_sigmoid_attn
+        self.force_magnitude = force_magnitude
 
         if use_sigmoid_attn and not use_cosine_attention:
             raise ValueError("Sigmoid attention requires cosine attention.")
@@ -89,6 +91,9 @@ class Attention(nn.Module):
             out = 1.8402 / math.sqrt(T) * F.sigmoid(q @ k.transpose(-2, -1) * self.scale) @ v
         else:
             out = F.scaled_dot_product_attention(q, k, v, scale=self.scale)
+
+        if self.force_magnitude:
+            out = magnitude(x) * normalize(out)
         
         out = out.transpose(-3, -2)                                         # (...B, T, H, D')
         out = out.reshape(*x.shape)                                         # (...B, T, D)

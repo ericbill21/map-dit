@@ -37,6 +37,7 @@ class DiT(nn.Module):
         learn_blending: bool=False,
         use_sigmoid_attn: bool=False,
         use_rotation_modulation: bool=False,
+        force_magnitude: bool=False,
     ):
         super().__init__()
 
@@ -137,7 +138,7 @@ class DiT(nn.Module):
         else:
             c = t + y
 
-        for block in self.blocks:
+        for block in enumerate(self.blocks):
             x = block(x, c)
 
         x = self.final_layer(x, c)                                              # (N, T, patch_size ** 2 * out_channels)
