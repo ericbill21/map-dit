@@ -24,7 +24,7 @@ def main(args):
 
     # Load model
     model = get_model(train_args).to(device)
-
+    model = torch.compile(model)
     if args.ckpt is not None:
         # For debugging purposes, load a specific checkpoint instead of EMA
         state_dict = torch.load(os.path.join(args.result_dir, "checkpoints", f"{args.ckpt}.pt"), map_location=device, weights_only=True)["model"]
