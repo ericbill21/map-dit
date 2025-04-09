@@ -81,10 +81,12 @@ class DiTBlock(nn.Module):
     def forward(self, x, c):
 
         if self.use_no_shift:
-            scale_msa, gate_msa, scale_mlp, gate_mlp = self.modulation(c)
+            shift_msa, gate_msa, shift_mlp, gate_mlp = self.modulation(c)
+            x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(mp_sum(x, shift_msa, t=0.5)), t=0.5)
+            x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(mp_sum(x, shift_mlp, t=0.5)), t=0.5)
 
-            shift_msa = torch.zeros_like(scale_msa)
-            shift_mlp = torch.zeros_like(scale_mlp)
+            return x
+
         else:
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
 
