@@ -82,8 +82,8 @@ class DiTBlock(nn.Module):
 
         if self.use_no_shift:
             shift_msa, gate_msa, shift_mlp, gate_mlp = self.modulation(c)
-            x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(mp_sum(x, shift_msa, t=0.5)), t=0.5)
-            x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(mp_sum(x, shift_mlp, t=0.5)), t=0.5)
+            x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(mp_sum(x, shift_msa.unsqueeze(1), t=0.5)), t=0.5)
+            x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(mp_sum(x, shift_mlp.unsqueeze(1), t=0.5)), t=0.5)
 
             return x
 
