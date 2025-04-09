@@ -43,6 +43,7 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="")
 
     model = get_model(args).to(device)
+    model = torch.compile(model)
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     # Setup EMA for the model (default: 250 snapshots)
@@ -269,7 +270,7 @@ if __name__ == "__main__":
     parser.add_argument("--use-all-mp", action="store_true")
 
     # New stuff
-    parser.add_argument("--use-no-shift", action="store_true", help="Use no shift in AdaLN")
+    parser.add_argument("--use-no-scale", action="store_true", help="Use no scale in AdaLN")
     parser.add_argument("--learn-blending", action="store_true", help="Learn residual blending factors")
     parser.add_argument("--sigmoid-attention", action="store_true", help="Use sigmoid attention instead of softmax")
     parser.add_argument("--rotation-modulation", action="store_true", help="Use rotation modulation instead of AdaLN")

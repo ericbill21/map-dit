@@ -20,7 +20,7 @@ class DiTBlock(nn.Module):
         use_mp_residual: bool,
         use_mp_silu: bool,
         use_no_layernorm: bool,
-        use_no_shift: bool,
+        use_no_scale: bool,
         learn_blending: bool,
         use_sigmoid_attn: bool,
         use_rotation_modulation: bool,
@@ -62,12 +62,12 @@ class DiTBlock(nn.Module):
 
         self.modulation = AdaLNModulation(
             hidden_size,
-            2 if use_no_shift else 3,
+            2 if use_no_scale else 3,
             use_wn=use_wn,
             use_forced_wn=use_forced_wn,
             use_mp_silu=use_mp_silu
         )
-        self.use_no_shift = use_no_shift
+        self.use_no_scale = use_no_scale
 
         # Learning 
         if learn_blending:
@@ -80,15 +80,15 @@ class DiTBlock(nn.Module):
 
     def forward(self, x, c):
 
-        if self.use_no_shift:
+        if self.use_no_scale:
             shift_msa, gate_msa, shift_mlp, gate_mlp = self.modulation(c)
-            x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(mp_sum(x, shift_msa.unsqueeze(1), t=0.5)), t=0.5)
-            x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(mp_sum(x, shift_mlp.unsqueeze(1), t=0.5)), t=0.5)
+    
+            x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(mp_sum(x, shift_msa.unsqueeze(1), t=0.5)), t=0.3)
+            x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(mp_sum(x, shift_mlp.unsqueeze(1), t=0.5)), t=0.3)
 
             return x
 
-        else:
-            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
 
         if self.use_mp_residual:
             x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)), t=F.sigmoid(self.blend_factor_msa))
