@@ -71,7 +71,7 @@ class DiTBlock(nn.Module):
     def forward(self, x, c):
         shift_msa, shift_mlp = self.modulation(c)
 
-        x = mp_sum(x, self.attn(mp_sum(x, shift_msa, t=0.5)), t=0.3)
-        x = mp_sum(x, self.mlp(mp_sum(x, shift_mlp, t=0.5)), t=0.3)
+        x = mp_sum(x, self.attn(mp_sum(x, shift_msa.unsqueeze(1), t=0.5)), t=0.3)
+        x = mp_sum(x, self.mlp(mp_sum(x, shift_mlp.unsqueeze(1), t=0.5)), t=0.3)
 
         return x
