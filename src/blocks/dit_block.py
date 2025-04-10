@@ -63,15 +63,27 @@ class DiTBlock(nn.Module):
         self.modulation = AdaLNModulation(
             hidden_size,
             1,
+            rotation=True,
             use_wn=use_wn,
             use_forced_wn=use_forced_wn,
             use_mp_silu=use_mp_silu
         )
 
     def forward(self, x, c):
-        shift_msa, shift_mlp = self.modulation(c)
+        theta_msa, theta_mlp = self.modulation(c)
 
-        x = mp_sum(x, self.attn(mp_sum(x, shift_msa.unsqueeze(1), t=0.5)), t=0.3)
-        x = mp_sum(x, self.mlp(mp_sum(x, shift_mlp.unsqueeze(1), t=0.5)), t=0.3)
+        x = mp_sum(x, self.attn(rot_modulate(x, theta_msa)), t=0.3)
+        x = mp_sum(x, self.mlp(rot_modulate(x, theta_mlp)), t=0.3)
 
         return x
+
+def rot_modulate(x, theta):
+        cos_theta = torch.cos(theta).unsqueeze(1)
+        sin_theta = torch.sin(theta).unsqueeze(1)
+
+        x_grp = x.view(x.shape[0], x.shape[1], -1, 2)
+        x_rot = torch.empty_like(x_grp)
+
+        x_rot[..., 0] = x_grp[..., 0] * cos_theta - x_grp[..., 1] * sin_theta
+        x_rot[..., 1] = x_grp[..., 0] * sin_theta + x_grp[..., 1] * cos_theta
+        return x_rot.view(x.shape[0], x.shape[1], -1)

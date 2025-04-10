@@ -12,6 +12,7 @@ class AdaLNModulation(nn.Module):
         use_wn: bool,
         use_forced_wn: bool,
         use_mp_silu: bool,
+        rotation: bool = False,
     ):
         super().__init__()
 
@@ -20,7 +21,7 @@ class AdaLNModulation(nn.Module):
             MPSiLU() if use_mp_silu else nn.SiLU(),
             MPLinear(
                 hidden_dim,
-                2 * num_modulates * hidden_dim,
+                2 * num_modulates * hidden_dim // 2 if rotation else 2 * num_modulates * hidden_dim,
                 zero_init=True,
                 use_wn=use_wn,
                 learn_gain=True,
