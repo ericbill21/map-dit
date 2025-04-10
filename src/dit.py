@@ -61,7 +61,7 @@ class DiT(nn.Module):
             use_wn=use_weight_normalization,
             use_forced_wn=use_forced_weight_normalization,
             use_mp_silu=use_mp_silu,
-            use_mp_embedding=use_mp_embedding,
+            use_mp_embedding=False,
         )
         self.y_embedder = LabelEmbedder(
             num_classes,

@@ -62,37 +62,16 @@ class DiTBlock(nn.Module):
 
         self.modulation = AdaLNModulation(
             hidden_size,
-            2 if use_no_shift else 3,
+            1,
             use_wn=use_wn,
             use_forced_wn=use_forced_wn,
             use_mp_silu=use_mp_silu
         )
-        self.use_no_shift = use_no_shift
-
-        # Learning 
-        if learn_blending:
-            self.blend_factor_msa = nn.Parameter(torch.tensor(0.0))
-            self.blend_factor_mlp = nn.Parameter(torch.tensor(0.0))
-        else:
-            # TODO: Work arround for now, to get a blending factor of 0.3
-            self.blend_factor_msa = torch.tensor(-0.8472977876663208)
-            self.blend_factor_mlp = torch.tensor(-0.8472977876663208)
 
     def forward(self, x, c):
+        shift_msa, shift_mlp = self.modulation(c)
 
-        if self.use_no_shift:
-            scale_msa, gate_msa, scale_mlp, gate_mlp = self.modulation(c)
-
-            shift_msa = torch.zeros_like(scale_msa)
-            shift_mlp = torch.zeros_like(scale_mlp)
-        else:
-            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
-
-        if self.use_mp_residual:
-            x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa)), t=F.sigmoid(self.blend_factor_msa))
-            x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp)), t=F.sigmoid(self.blend_factor_mlp))
-        else:
-            x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
-            x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+        x = mp_sum(x, self.attn(mp_sum(x, shift_msa, t=0.5)), t=0.3)
+        x = mp_sum(x, self.mlp(mp_sum(x, shift_mlp, t=0.5)), t=0.3)
 
         return x
