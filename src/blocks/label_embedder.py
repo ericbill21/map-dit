@@ -1,23 +1,16 @@
 import torch
 import torch.nn as nn
 
-from src.basic.mp_embedding import MPEmbedding
 
 class LabelEmbedder(nn.Module):
     """Embeds class labels into vector representations. Also handles label dropout for classifier-free guidance."""
 
-    def __init__(self, num_classes: int, hidden_size: int, dropout_prob: float, use_mp_embedding: bool=False):
+    def __init__(self, num_classes, hidden_size, dropout_prob):
         super().__init__()
         use_cfg_embedding = dropout_prob > 0
-        self.embedding = MPEmbedding(
-            num_classes + use_cfg_embedding,
-            hidden_size,
-            use_wn=use_mp_embedding,
-            use_forced_wn=use_mp_embedding,
-        )
+        self.embedding_table = nn.Embedding(num_classes + use_cfg_embedding, hidden_size)
         self.num_classes = num_classes
         self.dropout_prob = dropout_prob
-        self.use_mp_embedding = use_mp_embedding
 
     def token_drop(self, labels, force_drop_ids=None):
         """Drops labels to enable classifier-free guidance."""
@@ -26,12 +19,12 @@ class LabelEmbedder(nn.Module):
             drop_ids = torch.rand(labels.shape[0], device=labels.device) < self.dropout_prob
         else:
             drop_ids = force_drop_ids == 1
-        labels = torch.where(drop_ids, self.num_classes, labels)
-        return labels
+        
+        return torch.where(drop_ids, self.num_classes, labels)
 
     def forward(self, labels, train, force_drop_ids=None):
         use_dropout = self.dropout_prob > 0
         if (train and use_dropout) or (force_drop_ids is not None):
             labels = self.token_drop(labels, force_drop_ids)
 
-        return self.embedding(labels)
+        return self.embedding_table(labels)

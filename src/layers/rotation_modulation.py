@@ -1,5 +1,43 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn.utils.parametrizations import orthogonal
+
+
+def skew_symmetric(v: torch.Tensor, d: int) -> torch.Tensor:
+    """
+    Inputs:
+        v (torch.Tensor): Shape (batch_size, d * (d-1) // 2)
+        d (int): Dimensionality of the rotation matrix
+
+    Output (torch.Tensor): Shape (batch_size, d, d)
+    """
+
+    A = torch.zeros((v.shape[0], d, d), device=v.device, dtype=v.dtype)
+    triu_indices = torch.triu_indices(d, d, offset=1)
+    A[:, triu_indices[0], triu_indices[1]] = v
+    A[:, triu_indices[1], triu_indices[0]] = -v
+
+    return A
+
+
+def get_rotation_matrix(v: torch.Tensor, d: int, identity: Optional[torch.Tensor]=None) -> torch.Tensor:
+    """
+    Inputs:
+        x (torch.Tensor): Shape (batch_size, d * (d-1) // 2)
+        d (int): Dimensionality of the rotation matrix
+        identity (torch.Tensor): Identity matrix of shape (d, d)
+
+    Output (torch.Tensor): Shape (batch_size, d, d)
+    """
+
+    if identity is None:
+        identity = torch.eye(d, device=v.device, dtype=v.dtype)
+
+    A = skew_symmetric(v, d)
+    return torch.linalg.matrix_exp(A)
 
 
 class RotationNetwork(nn.Module):
@@ -12,6 +50,7 @@ class RotationNetwork(nn.Module):
             nn.Linear(n, d * (d-1) // 2),
         )
         self.d = d
+        self.register_buffer("I", torch.eye(d, dtype=torch.float32))
 
     def forward(self, x):
         """
@@ -19,14 +58,7 @@ class RotationNetwork(nn.Module):
         """
 
         v = self.net(x)
-
-        # Construct skew-symmetric matrix from vector
-        A = torch.zeros((x.shape[0], self.d, self.d), device=v.device, dtype=v.dtype)
-        triu_indices = torch.triu_indices(self.d, self.d, offset=1)
-        A[:, triu_indices[0], triu_indices[1]] = v
-        A[:, triu_indices[1], triu_indices[0]] = -v
-
-        return torch.linalg.matrix_exp(A)
+        return get_rotation_matrix(v, self.d, self.I)
 
 
 class RotationModulation(nn.Module):
@@ -43,7 +75,7 @@ class RotationModulation(nn.Module):
         super().__init__()
 
         # Learned projection matrix P, mapping from the full space to the subspace
-        self.P = nn.Parameter(torch.randn(n, d))
+        self.project = orthogonal(nn.Linear(n, d, bias=False), orthogonal_map="householder")
         self.rotation_net = RotationNetwork(cond_dim, d)
         self.d = d
     
@@ -56,14 +88,13 @@ class RotationModulation(nn.Module):
         Output (torch.Tensor): Shape (batch_size, n)
         """
 
-        U, _ = torch.linalg.qr(self.P)
         R = self.rotation_net(cond)
 
         # Efficient way of implementing x_rot = URU^T x + x_{\perp}, where x_{\perp} = x - UU^T x
         # Here, URU^T is the rotation matrix in the subspace and x_{\perp} is the projection onto the
         # orthogonal complement of the subspace
-        z = torch.matmul(x, U)
-        z_rot = torch.matmul(z, R)
-        x_rot = x + torch.matmul(z_rot - z, U.T)
+        z = self.project(x)
+        z_rot = torch.bmm(z, R)
+        x_rot = x + F.linear(z_rot - z, self.project.weight.T)
 
         return x_rot

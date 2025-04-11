@@ -1,60 +1,44 @@
-import torch
-import torch.nn as nn
 import math
 
-from src.layers.mlp import MLP
-from src.basic.mp_embedding import MPEmbedding
+import torch
+import torch.nn as nn
 
 
 class TimestepEmbedder(nn.Module):
     """Embeds scalar timesteps into vector representations."""
 
-    def __init__(
-        self,
-        hidden_size: int,
-        use_wn: bool,
-        use_forced_wn: bool,
-        use_mp_silu: bool,
-        use_mp_embedding: bool,
-    ):
+    def __init__(self, hidden_size, frequency_embedding_size=256):
         super().__init__()
-
-        self.mlp = MLP(
-            hidden_size,
-            hidden_size,
-            hidden_dim=hidden_size,
-            use_wn=use_wn,
-            use_forced_wn=use_forced_wn,
-            use_mp_silu=use_mp_silu,
+        self.mlp = nn.Sequential(
+            nn.Linear(frequency_embedding_size, hidden_size, bias=True),
+            nn.SiLU(),
+            nn.Linear(hidden_size, hidden_size, bias=True),
         )
+        self.frequency_embedding_size = frequency_embedding_size
 
-        if use_mp_embedding:
-            self.embedding = MPEmbedding(1000, hidden_size, use_wn, use_forced_wn)
-        else:
-            self.embedding = SinusoidalEncoding(hidden_size)
+    @staticmethod
+    def timestep_embedding(t, dim, max_period=10000):
+        """
+        Create sinusoidal timestep embeddings.
+        :param t: a 1-D Tensor of N indices, one per batch element.
+                          These may be fractional.
+        :param dim: the dimension of the output.
+        :param max_period: controls the minimum frequency of the embeddings.
+        :return: an (N, D) Tensor of positional embeddings.
+        """
+
+        # https://github.com/openai/glide-text2im/blob/main/glide_text2im/nn.py
+        half = dim // 2
+        freqs = torch.exp(
+            -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half
+        ).to(device=t.device)
+        args = t[:, None].float() * freqs[None]
+        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+        if dim % 2:
+            embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+        return embedding
 
     def forward(self, t):
-        return self.mlp(self.embedding(t))
-
-
-class SinusoidalEncoding(nn.Module):
-    def __init__(self, hidden_dim: int, max_period: float=10000.0):
-        super().__init__()
-        assert hidden_dim % 2 == 0, "hidden_dim must be an even number"
-
-        self.register_buffer(
-            "div_term",
-            torch.exp(-math.log(max_period) * torch.arange(0, hidden_dim, 2, dtype=torch.float) / hidden_dim),
-        )
-        self.hidden_dim = hidden_dim
-
-    def forward(self, pos: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            pos: (...B)
-        
-        Returns: (...B, hidden_dim)
-        """
-
-        pos_div = pos.float().unsqueeze(-1) * self.div_term
-        return torch.cat([torch.cos(pos_div), torch.sin(pos_div)], dim=-1)
+        t_freq = self.timestep_embedding(t, self.frequency_embedding_size)
+        t_emb = self.mlp(t_freq)
+        return t_emb

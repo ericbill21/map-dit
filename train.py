@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 from diffusion import create_diffusion
-from src.ema import EMA
 from src.models import DIT_MODELS
 from utils import create_logger, get_model
 
@@ -43,13 +42,8 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="")
 
     model = get_model(args).to(device)
+    model = torch.compile(model)
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
-
-    # Setup EMA for the model (default: 250 snapshots)
-    if args.ema_snapshot_every is None:
-        args.ema_snapshot_every = args.num_steps // 250
-
-    ema = EMA(model, results_dir=exp_dir, stds=[0.05, 0.1])
 
     # Optimizer
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.99))
@@ -100,7 +94,6 @@ def main(args):
 
             # Update EMA
             scheduler.step()
-            ema.update(train_steps, model)
 
             if train_steps % args.log_every == 0:
                 # Measure training speed
@@ -128,11 +121,6 @@ def main(args):
                 checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
                 logger.info(f"saving checkpoint to {checkpoint_path} at step {train_steps}...")
                 torch.save(checkpoint, checkpoint_path)
-
-            # Save EMA snapshot
-            if train_steps % args.ema_snapshot_every == 0 and args.ema_snapshot_every != 0 and train_steps > 0:
-                logger.info(f"saving ema snapshot to {ema.ema_dir} at step {train_steps}...")
-                ema.save_snapshot(train_steps)
 
         epochs += 1
     
@@ -225,11 +213,11 @@ if __name__ == "__main__":
     # Training loop
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, required=True)
-    parser.add_argument("--model", type=str, choices=list(DIT_MODELS.keys()), default="DiT-XS/2")
+    parser.add_argument("--model", type=str, choices=list(DIT_MODELS.keys()), default="DiT-S/4")
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--num-steps", type=int, default=400_000)
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--verbose", type=int, help="0: warning, 1: info, 2: debug", choices=[0, 1, 2], default=1)
     parser.add_argument("--num-workers", type=int, default=4)
@@ -239,20 +227,6 @@ if __name__ == "__main__":
     # Learning rate scheduler
     parser.add_argument("--num-lin-warmup", type=int, default=None, help="Number of steps for linear warmup of the learning rate")
     parser.add_argument("--start-decay", type=int, default=None, help="Step to start decaying the learning rate")
-
-    # EMA
-    parser.add_argument("--ema-snapshot-every", type=int, default=None, help="Number of steps to save EMA snapshots")
-
-    # Magnitude preserving feature flags
-    parser.add_argument("--use-cosine-attention", action="store_true")
-    parser.add_argument("--use-weight-normalization", action="store_true")
-    parser.add_argument("--use-forced-weight-normalization", action="store_true")
-    parser.add_argument("--use-mp-residual", action="store_true")
-    parser.add_argument("--use-mp-silu", action="store_true")
-    parser.add_argument("--use-no-layernorm", action="store_true")
-    parser.add_argument("--use-mp-pos-enc", action="store_true")
-    parser.add_argument("--use-mp-embedding", action="store_true")
-    parser.add_argument("--use-rotation-modulation", action="store_true")
 
     args = parser.parse_args()
     main(args)

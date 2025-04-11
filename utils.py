@@ -14,15 +14,6 @@ def get_model(args):
         in_channels=args["in_channels"],
         input_size=args["input_size"],
         num_classes=args["num_classes"],
-        use_cosine_attention=args["use_cosine_attention"],
-        use_weight_normalization=args["use_weight_normalization"],
-        use_forced_weight_normalization=args["use_forced_weight_normalization"],
-        use_mp_residual=args["use_mp_residual"],
-        use_mp_silu=args["use_mp_silu"],
-        use_no_layernorm=args["use_no_layernorm"],
-        use_mp_pos_enc=args["use_mp_pos_enc"],
-        use_mp_embedding=args["use_mp_embedding"],
-        use_rotation_modulation=args["use_rotation_modulation"],
     ) 
 
 
