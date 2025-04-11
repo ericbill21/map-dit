@@ -14,7 +14,6 @@ class DiT(nn.Module):
         self,
         depth: int,
         hidden_size: int,
-        rotation_dim: int,
         patch_size: int,
         input_size: int=32,
         in_channels: int=3,
@@ -43,9 +42,9 @@ class DiT(nn.Module):
         self.register_buffer("pos_embed", normalize(pos_embed - pos_embed.mean()))
 
         self.blocks = nn.ModuleList([
-            DiTBlock(hidden_size, num_heads, rotation_dim, mlp_ratio=mlp_ratio) for _ in range(depth)
+            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
         ])
-        self.final_layer = FinalBlock(hidden_size, rotation_dim, patch_size, self.out_channels)
+        self.final_layer = FinalBlock(hidden_size, patch_size, self.out_channels)
     
     def ckpt_wrapper(self, module):
         def ckpt_forward(*inputs):
@@ -70,7 +69,7 @@ class DiT(nn.Module):
 
         t = self.t_embedder(t)
         y = self.y_embedder(y, self.training)
-        c = t + y
+        c = mp_sum(t, y, t=0.5)
 
         for block in self.blocks:
             x = block(x, c)

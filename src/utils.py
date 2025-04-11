@@ -103,3 +103,22 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
 
     emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
     return emb
+
+
+def rotate_2d(x: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
+    """
+    Args:
+        x: (..., B, T, D)
+        theta: (..., B, D') where D' = D // 2
+    
+    Returns: (..., D)
+    """
+    D = x.shape[-1]
+
+    cos = torch.cos(theta).unsqueeze(1)
+    sin = torch.sin(theta).unsqueeze(1)
+
+    x_rot = torch.zeros_like(x)
+    x_rot[..., :D//2] = x[..., :D//2] * cos - x[..., D//2:] * sin
+    x_rot[..., D//2:] = x[..., :D//2] * sin + x[..., D//2:] * cos
+    return x_rot

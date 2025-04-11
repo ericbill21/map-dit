@@ -14,7 +14,6 @@ from diffusion import create_diffusion
 from src.models import DIT_MODELS
 from utils import create_logger, get_model
 
-
 def main(args):
     torch.manual_seed(args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -42,7 +41,7 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="")
 
     model = get_model(args).to(device)
-    model = torch.compile(model)
+    # model = torch.compile(model)
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     # Optimizer

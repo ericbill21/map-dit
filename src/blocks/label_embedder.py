@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from src.basic.mp_embedding import MPEmbedding
+
 
 class LabelEmbedder(nn.Module):
     """Embeds class labels into vector representations. Also handles label dropout for classifier-free guidance."""
@@ -8,7 +10,7 @@ class LabelEmbedder(nn.Module):
     def __init__(self, num_classes, hidden_size, dropout_prob):
         super().__init__()
         use_cfg_embedding = dropout_prob > 0
-        self.embedding_table = nn.Embedding(num_classes + use_cfg_embedding, hidden_size)
+        self.embedding_table = MPEmbedding(num_classes + use_cfg_embedding, hidden_size)
         self.num_classes = num_classes
         self.dropout_prob = dropout_prob
 

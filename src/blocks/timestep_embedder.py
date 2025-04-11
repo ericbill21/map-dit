@@ -3,6 +3,10 @@ import math
 import torch
 import torch.nn as nn
 
+from src.basic.mp_linear import MPLinear
+from src.basic.mp_silu import MPSiLU
+from src.utils import normalize
+
 
 class TimestepEmbedder(nn.Module):
     """Embeds scalar timesteps into vector representations."""
@@ -10,9 +14,9 @@ class TimestepEmbedder(nn.Module):
     def __init__(self, hidden_size, frequency_embedding_size=256):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(frequency_embedding_size, hidden_size, bias=True),
-            nn.SiLU(),
-            nn.Linear(hidden_size, hidden_size, bias=True),
+            MPLinear(frequency_embedding_size, hidden_size),
+            MPSiLU(),
+            MPLinear(hidden_size, hidden_size),
         )
         self.frequency_embedding_size = frequency_embedding_size
 
@@ -39,6 +43,8 @@ class TimestepEmbedder(nn.Module):
         return embedding
 
     def forward(self, t):
+        # Since embedding is not learned, we can normalize it
         t_freq = self.timestep_embedding(t, self.frequency_embedding_size)
-        t_emb = self.mlp(t_freq)
-        return t_emb
+        t_freq = normalize(t_freq - t_freq.mean(dim=0, keepdim=True))
+
+        return self.mlp(t_freq)
