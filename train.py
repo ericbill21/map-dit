@@ -41,7 +41,7 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="")
 
     model = get_model(args).to(device)
-    # model = torch.compile(model)
+    model = torch.compile(model)
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     # Optimizer
