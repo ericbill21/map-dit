@@ -70,8 +70,13 @@ class DiT(nn.Module):
         t = self.t_embedder(t)
         y = self.y_embedder(y, self.training)
         c = mp_sum(t, y, t=0.5)
+        
+        # from src.utils import magnitude
+        # print(f"t = {magnitude(t):.3f}, y = {magnitude(y):.3f}, c = {magnitude(c):.3f}")
 
-        for block in self.blocks:
+        for idx, block in enumerate(self.blocks):
+            # from src.utils import magnitude
+            # print(f"Block {idx} x= {magnitude(x):.3f}, c = {magnitude(c):.3f}")
             x = block(x, c)
 
         x = self.final_layer(x, c)

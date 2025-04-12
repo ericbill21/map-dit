@@ -1,7 +1,9 @@
+import torch
 import torch.nn as nn
 
 from src.utils import mp_sum, rotate_2d
 from src.basic.mp_linear import MPLinear
+from src.layers.mlp import MLP
 from src.layers.rotation_modulation import RotationModulation
 
 

@@ -5,7 +5,26 @@ import torch.nn as nn
 
 from src.basic.mp_linear import MPLinear
 from src.basic.mp_silu import MPSiLU
-from src.utils import normalize
+
+import torch
+from src.basic.mp_embedding import MPEmbedding
+
+
+
+class MPFourier(torch.nn.Module):
+    def __init__(self, num_channels):
+        super().__init__()
+        
+        scale = 2 * torch.pi * torch.randn(num_channels) 
+        shift = 2 * torch.pi * torch.rand(num_channels)
+
+        self.register_buffer("scale", scale.to(torch.float32))
+        self.register_buffer("shift", shift.to(torch.float32))
+
+    def forward(self, x):
+        # cos(2 * \pi * (freqs * x + phases))
+        res = torch.cos(torch.outer(x, self.scale) + self.shift)
+        return math.sqrt(2) * res.to(torch.float32)
 
 
 class TimestepEmbedder(nn.Module):
@@ -19,6 +38,8 @@ class TimestepEmbedder(nn.Module):
             MPLinear(hidden_size, hidden_size),
         )
         self.frequency_embedding_size = frequency_embedding_size
+        self.embedding = MPFourier(frequency_embedding_size)
+        # self.embedding = MPEmbedding(1000, hidden_size)
 
     @staticmethod
     def timestep_embedding(t, dim, max_period=10000):
@@ -43,8 +64,5 @@ class TimestepEmbedder(nn.Module):
         return embedding
 
     def forward(self, t):
-        # Since embedding is not learned, we can normalize it
-        t_freq = self.timestep_embedding(t, self.frequency_embedding_size)
-        t_freq = normalize(t_freq - t_freq.mean(dim=0, keepdim=True))
-
+        t_freq = self.embedding(t)
         return self.mlp(t_freq)
