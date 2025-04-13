@@ -67,9 +67,9 @@ class DiT(nn.Module):
         x = torch.cat([x, torch.ones_like(x[:, :, :1])], dim=-1)
         x = mp_sum(self.x_embedder(x), self.pos_embed, t=0.5)
 
-        t = self.t_embedder(t)
-        y = self.y_embedder(y, self.training)
-        c = mp_sum(t, y, t=0.5)
+        t_emb = self.t_embedder(t)
+        y_emb = self.y_embedder(y, self.training)
+        c = mp_sum(t_emb, y_emb, t=0.5)
         
         # from src.utils import magnitude
         # print(f"t = {magnitude(t):.3f}, y = {magnitude(y):.3f}, c = {magnitude(c):.3f}")
@@ -79,7 +79,7 @@ class DiT(nn.Module):
             # print(f"Block {idx} x= {magnitude(x):.3f}, c = {magnitude(c):.3f}")
             x = block(x, c)
 
-        x = self.final_layer(x, c)
+        x = self.final_layer(x, c, t, y)
         return unpatchify(x, self.input_size, self.patch_size)
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
