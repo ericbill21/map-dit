@@ -53,6 +53,4 @@ class Attention(nn.Module):
         out = out.reshape(*x.shape)                                         # (...B, T, D)
         
         # Since attention can only decrease the magnitude, we renormalize the output to unit magnitude
-        out = normalize(out)
-
-        return self.out_proj(out)
+        return normalize(self.out_proj(out))

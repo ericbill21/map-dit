@@ -227,6 +227,7 @@ if __name__ == "__main__":
     # Learning rate scheduler
     parser.add_argument("--num-lin-warmup", type=int, default=None, help="Number of steps for linear warmup of the learning rate")
     parser.add_argument("--start-decay", type=int, default=None, help="Step to start decaying the learning rate")
+    parser.add_argument("--attn-scale", type=float, default=0.3, help="Attention residual")
 
     args = parser.parse_args()
     main(args)

@@ -15,7 +15,7 @@ class FinalBlock(nn.Module):
         self.modulation = RotationModulation(hidden_dim, with_gate=False)
 
     def forward(self, x, c):
-        # scale, shift, _ = self.modulation(c)
+        scale, (shift, blend), _ = self.modulation(c)
 
-        # x_mod = mp_sum(rotate_2d(x, scale), shift.unsqueeze(1), t=0.3)
-        return self.linear(x)
+        x_mod = mp_sum(rotate_2d(x, scale), shift.unsqueeze(1), t=blend.unsqueeze(1))
+        return self.linear(x_mod)

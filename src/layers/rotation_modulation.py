@@ -2,19 +2,12 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 
 from src.basic.mp_linear import MPLinear
 from src.basic.mp_silu import MPSiLU
 
-class GaussianDip(nn.Module):
-    def __init__(self, scale: float=1.0):
-        super().__init__()
-        self.scale = scale
     
-    def forward(self, x):
-        return 1 - torch.exp(-0.5 * self.scale * x**2)
-    
-
 class theta_net(nn.Module):
     def __init__(self, in_dim: int):
         super().__init__()
@@ -41,12 +34,11 @@ class shift_net(nn.Module):
         self.blend = nn.Sequential(
             MPSiLU(),
             nn.Linear(in_dim, 1, bias=False),
-            GaussianDip(),
         )
         nn.init.zeros_(self.blend[1].weight)
 
     def forward(self, x):
-        return self.net(x), self.blend(x)
+        return self.net(x), F.sigmoid(self.blend(x) - 2.1972)
     
 
 class RotationModulation(nn.Module):
@@ -70,8 +62,7 @@ class RotationModulation(nn.Module):
             cond (torch.Tensor): Shape (batch_size, cond_dim)
         Output:
             scale (torch.Tensor): Shape (batch_size, cond_dim//2)
-            shift (torch.Tensor): Shape (batch_size, cond_dim)
-            shift_blend (torch.Tensor): Shape (batch_size, 1)
+            shift (torch.Tensor, torch.Tensor): Shape (batch_size, cond_dim), Shape (batch_size, 1)
             gate (torch.Tensor): Shape (batch_size, cond_dim//2)
         """
-        return self.scale_net(cond), self.shift_net.net(cond), self.shift_net.blend(cond), self.gate_net(cond)
+        return self.scale_net(cond), self.shift_net(cond), self.gate_net(cond)

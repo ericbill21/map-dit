@@ -21,6 +21,7 @@ class DiT(nn.Module):
         mlp_ratio: float=4.0,
         class_dropout_prob: float=0.1,
         num_classes: int=1000,
+        attn_scale: float=0.3,
         learn_sigma: bool=True,
     ):
         super().__init__()
@@ -42,7 +43,7 @@ class DiT(nn.Module):
         self.register_buffer("pos_embed", normalize(pos_embed - pos_embed.mean()))
 
         self.blocks = nn.ModuleList([
-            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
+            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, attn_scale=attn_scale) for _ in range(depth)
         ])
         self.final_layer = FinalBlock(hidden_size, patch_size, self.out_channels)
     
@@ -71,12 +72,9 @@ class DiT(nn.Module):
         y_emb = self.y_embedder(y, self.training)
         c = mp_sum(t_emb, y_emb, t=0.5)
         
-        # from src.utils import magnitude
-        # print(f"t = {magnitude(t):.3f}, y = {magnitude(y):.3f}, c = {magnitude(c):.3f}")
-
         for idx, block in enumerate(self.blocks):
             # from src.utils import magnitude
-            # print(f"Block {idx} x= {magnitude(x):.3f}, c = {magnitude(c):.3f}")
+            # print(f"Block {idx} x={magnitude(x.flatten(1)):.3f} c={magnitude(c.flatten(1)):.3f}")
             x = block(x, c)
 
         x = self.final_layer(x, c)
