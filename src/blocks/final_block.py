@@ -14,10 +14,8 @@ class FinalBlock(nn.Module):
         self.linear = MPLinear(hidden_dim, patch_size * patch_size * out_channels)
         self.modulation = RotationModulation(hidden_dim, with_gate=False)
 
-        self.register_buffer("mag_table", torch.load("mags.pt"))
+    def forward(self, x, c):
+        # scale, shift, _ = self.modulation(c)
 
-    def forward(self, x, c, t, y):
-        scale, shift, _ = self.modulation(c)
-        x_mod = mp_sum(rotate_2d(x, scale), shift.unsqueeze(1), t=0.3)
-
-        return self.mag_table[y, t].view(x.shape[0], 1, 1) * self.linear(x_mod)
+        # x_mod = mp_sum(rotate_2d(x, scale), shift.unsqueeze(1), t=0.3)
+        return self.linear(x)

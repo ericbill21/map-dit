@@ -79,7 +79,7 @@ class DiT(nn.Module):
             # print(f"Block {idx} x= {magnitude(x):.3f}, c = {magnitude(c):.3f}")
             x = block(x, c)
 
-        x = self.final_layer(x, c, t, y)
+        x = self.final_layer(x, c)
         return unpatchify(x, self.input_size, self.patch_size)
 
     def forward_with_cfg(self, x, t, y, cfg_scale):

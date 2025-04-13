@@ -11,7 +11,8 @@ def magnitude(x: torch.Tensor) -> torch.Tensor:
 
 
 def mp_sum(a: torch.Tensor, b: torch.Tensor, t: float=0.5) -> torch.Tensor:
-    return a.lerp(b, t) / math.sqrt((1 - t) ** 2 + t ** 2)
+    if type(t) is float: t = torch.tensor(t, device=a.device)
+    return a.lerp(b, t) / torch.sqrt((1 - t) ** 2 + t ** 2)
 
 
 def normalize(x: torch.Tensor, eps=1e-4) -> torch.Tensor:
