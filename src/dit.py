@@ -9,7 +9,6 @@ from src.blocks.final_layer import FinalLayer
 from src.pos_embed import get_2d_sincos_pos_embed
 from src.utils import mp_sum, patchify, unpatchify, normalize
 
-
 class DiT(nn.Module):
     """Diffusion model with a Transformer backbone."""
 
@@ -25,52 +24,27 @@ class DiT(nn.Module):
         class_dropout_prob: float=0.1,
         num_classes: int=1000,
         learn_sigma: bool=True,
-        use_cosine_attention: bool=False,
-        use_weight_normalization: bool=False,
-        use_forced_weight_normalization: bool=False,
-        use_mp_residual: bool=False,
-        use_mp_silu: bool=False,
-        use_mp_embedding: bool=False,
-        use_no_layernorm: bool=False,
-        use_mp_pos_enc: bool=False,
     ):
         super().__init__()
 
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
-        self.out_channels = in_channels * 2 if learn_sigma else in_channels
+        self.out_channels = in_channels
         self.input_size = input_size
         self.patch_size = patch_size
         self.num_heads = num_heads
-        self.use_mp_residual = use_mp_residual
-
+    
         # Add one to the in_channels for input bias
         self.x_embedder = MPLinear(
             patch_size * patch_size * in_channels + 1,
             hidden_size,
-            use_wn=use_weight_normalization,
-            use_forced_wn=use_forced_weight_normalization,
         )
-        self.t_embedder = TimestepEmbedder(
-            hidden_size,
-            use_wn=use_weight_normalization,
-            use_forced_wn=use_forced_weight_normalization,
-            use_mp_silu=use_mp_silu,
-            use_mp_embedding=use_mp_embedding,
-        )
-        self.y_embedder = LabelEmbedder(
-            num_classes,
-            hidden_size,
-            class_dropout_prob,
-            use_mp_embedding=use_mp_embedding,
-        )
+        self.t_embedder = TimestepEmbedder(hidden_size)
+        self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
 
+        # Normalize the positional embedding as its a constant
         pos_embed = torch.from_numpy(get_2d_sincos_pos_embed(hidden_size, input_size // patch_size)).float().unsqueeze(0)
-
-        # Normalize positional embedding
-        if use_mp_pos_enc:
-            pos_embed = normalize(pos_embed)
-
+        pos_embed = normalize(pos_embed)
         self.register_buffer("pos_embed", pos_embed)
 
         self.blocks = nn.ModuleList([
@@ -78,22 +52,13 @@ class DiT(nn.Module):
                 hidden_size,
                 num_heads,
                 mlp_ratio=mlp_ratio,
-                use_cosine_attention=use_cosine_attention,
-                use_wn=use_weight_normalization,
-                use_forced_wn=use_forced_weight_normalization,
-                use_mp_residual=use_mp_residual,
-                use_mp_silu=use_mp_silu,
-                use_no_layernorm=use_no_layernorm,
             ) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(
             hidden_size,
             patch_size,
             self.out_channels,
-            use_wn=use_weight_normalization,
-            use_forced_wn=use_forced_weight_normalization,
-            use_mp_silu=use_mp_silu,
-            use_no_layernorm=use_no_layernorm,
+            learn_sigma=learn_sigma,
         )
     
     def ckpt_wrapper(self, module):
@@ -116,24 +81,26 @@ class DiT(nn.Module):
         x = patchify(x, self.patch_size)                                        # (N, T, (patch_size ** 2) * in_channels)
         x = torch.cat([x, torch.ones_like(x[:, :, :1])], dim=-1)                # (N, T, (patch_size ** 2) * in_channels + 1)
 
-        if self.use_mp_residual:
-            x = mp_sum(self.x_embedder(x), self.pos_embed, t=0.5)               # (N, T, D)
-        else:
-            x = self.x_embedder(x) + self.pos_embed                             # (N, T, D), where T = H * W / patch_size ** 2
-
+        x = mp_sum(self.x_embedder(x), self.pos_embed, t=0.5)                   # (N, T, D)
+   
         t = self.t_embedder(t)                                                  # (N, D)
         y = self.y_embedder(y, self.training)                                   # (N, D)
-
-        if self.use_mp_residual:
-            c = mp_sum(t, y, t=0.5)                                             # (N, D)
-        else:
-            c = t + y
+        c = mp_sum(t, y, t=0.5)                                                 # (N, D)
 
         for block in self.blocks:
             x = block(x, c)
 
-        x = self.final_layer(x, c)                                              # (N, T, patch_size ** 2 * out_channels)
-        return unpatchify(x, self.input_size, self.patch_size)
+        if self.learn_sigma:
+            mean, sigma = self.final_layer(x, c)                                    # 2 * (N, T, patch_size ** 2 * out_channels)
+            out = torch.cat([
+                unpatchify(mean, self.input_size, self.patch_size),
+                unpatchify(sigma, self.input_size, self.patch_size)
+            ], dim=1)
+        else:
+            mean = self.final_layer(x, c)                                           # (N, T, patch_size ** 2 * out_channels)
+            out = unpatchify(mean, self.input_size, self.patch_size)
+
+        return out
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
         """Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance."""

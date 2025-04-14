@@ -43,6 +43,8 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="")
 
     model = get_model(args).to(device)
+    model = torch.compile(model)
+
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     # Setup EMA for the model (default: 250 snapshots)
@@ -229,7 +231,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--num-steps", type=int, default=400_000)
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--verbose", type=int, help="0: warning, 1: info, 2: debug", choices=[0, 1, 2], default=1)
     parser.add_argument("--num-workers", type=int, default=4)
@@ -242,16 +244,6 @@ if __name__ == "__main__":
 
     # EMA
     parser.add_argument("--ema-snapshot-every", type=int, default=None, help="Number of steps to save EMA snapshots")
-
-    # Magnitude preserving feature flags
-    parser.add_argument("--use-cosine-attention", action="store_true")
-    parser.add_argument("--use-weight-normalization", action="store_true")
-    parser.add_argument("--use-forced-weight-normalization", action="store_true")
-    parser.add_argument("--use-mp-residual", action="store_true")
-    parser.add_argument("--use-mp-silu", action="store_true")
-    parser.add_argument("--use-no-layernorm", action="store_true")
-    parser.add_argument("--use-mp-pos-enc", action="store_true")
-    parser.add_argument("--use-mp-embedding", action="store_true")
 
     args = parser.parse_args()
     main(args)

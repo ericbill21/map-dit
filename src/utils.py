@@ -9,7 +9,7 @@ def magnitude(x: torch.Tensor) -> torch.Tensor:
 
 
 def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-    return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+    return mp_sum(x * (1 + scale.unsqueeze(1)), shift.unsqueeze(1), t=0.5)
 
 
 def mp_sum(a: torch.Tensor, b: torch.Tensor, t: float=0.5) -> torch.Tensor:
@@ -22,10 +22,15 @@ def normalize(x: torch.Tensor, eps=1e-4) -> torch.Tensor:
     norm = torch.linalg.vector_norm(x, dim=-1, keepdim=True)
     return x * math.sqrt(x.shape[-1]) / (norm + eps)
 
-
-def magnitude(x: torch.Tensor) -> torch.Tensor:
-    """Computes the mean magnitude."""
-    return x.square().mean(-1).sqrt().mean()
+def chunk_normalize(w: torch.Tensor, n: int, eps=1e-4) -> torch.Tensor:
+    # Dividing by norm makes the std of the weights equal to 1/sqrt(in_dim), so we
+    # multiply by sqrt(in_dim) to compensate
+    # Additionally, we normalize to each chunk, hence the view
+    out_dim, in_dim = w.shape
+    w_view = w.view(n, out_dim//n, in_dim)
+    norm = torch.linalg.vector_norm(w_view, dim=-1, keepdim=True)
+    w = w_view * math.sqrt(in_dim) / (norm + eps)
+    return w.reshape(out_dim, in_dim)
 
 
 def patchify(x: torch.Tensor, patch_size: int) -> torch.Tensor:

@@ -6,28 +6,19 @@ from src.utils import normalize
 
 
 class MPEmbedding(nn.Module):
-    def __init__(self, num_embeddings: int, embedding_dim: int, use_wn: bool, use_forced_wn: bool):
+    def __init__(self, num_embeddings: int, embedding_dim: int):
         super().__init__()
 
-        self.use_wn = use_wn
-        self.use_forced_wn = use_forced_wn
-
         self.weight = nn.Parameter(torch.empty(num_embeddings, embedding_dim))
-
-        if use_wn:
-            nn.init.normal_(self.weight)
-        else:
-            nn.init.kaiming_uniform_(self.weight)
-
+        nn.init.normal_(self.weight)
+    
     def forward(self, x):
         # Forced weight normalization
-        if self.training and self.use_forced_wn:
+        if self.training:
             with torch.no_grad():
                 self.weight.copy_(normalize(self.weight))
 
         # Traditional weight normalization
-        w = self.weight
-        if self.use_wn:
-            w = normalize(w)
+        w = normalize(self.weight)
 
         return F.embedding(x, w)

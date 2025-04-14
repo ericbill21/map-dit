@@ -24,6 +24,7 @@ def main(args):
 
     # Load model
     model = get_model(train_args).to(device)
+    model = torch.compile(model)
 
     if args.ckpt is not None:
         # For debugging purposes, load a specific checkpoint instead of EMA

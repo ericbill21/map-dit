@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-from src.basic.mp_linear import MPLinear
+from src.basic.mp_linear import MPLinear, MPLinearChunk
 from src.utils import normalize
 
 
@@ -11,22 +11,16 @@ class Attention(nn.Module):
         self,
         in_dim: int,
         num_heads: int,
-        use_cosine_attention: bool,
-        use_wn: bool,
-        use_forced_wn: bool,
     ):
         super().__init__()
 
         assert in_dim % num_heads == 0
 
-        self.use_cosine = use_cosine_attention
         self.num_heads = num_heads
         self.head_dim = in_dim // num_heads
 
-        self.q_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
-        self.k_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
-        self.v_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
-        self.out_proj = MPLinear(in_dim, in_dim, use_wn=use_wn, use_forced_wn=use_forced_wn)
+        self.qkv_proj = MPLinearChunk(in_dim, in_dim, 3)
+        self.out_proj = MPLinear(in_dim, in_dim)
 
         self.scale = 1.0 / math.sqrt(self.head_dim)
 
@@ -40,17 +34,15 @@ class Attention(nn.Module):
 
         T = x.shape[-2]
 
-        q = self.q_proj(x)                                                  # (...B, T, D)
-        k = self.k_proj(x)                                                  # (...B, T, D)
-        v = self.v_proj(x)                                                  # (...B, T, D)
+        q, k, v = self.qkv_proj(x)                                          # (...B, T, 3 * D)
 
         q = q.view(-1, T, self.num_heads, self.head_dim).transpose(-3, -2)  # (...B, H, T, D') where D' = D / H
         k = k.view(-1, T, self.num_heads, self.head_dim).transpose(-3, -2)  # (...B, H, T, D')
         v = v.view(-1, T, self.num_heads, self.head_dim).transpose(-3, -2)  # (...B, H, T, D')
 
-        if self.use_cosine:
-            q = normalize(q)
-            k = normalize(k)
+        # cosine attention
+        q = normalize(q)
+        k = normalize(k)
 
         out = F.scaled_dot_product_attention(q, k, v, scale=self.scale)     # (...B, H, T, D')
         out = out.transpose(-3, -2)                                         # (...B, T, H, D')
