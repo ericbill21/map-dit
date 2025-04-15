@@ -19,7 +19,7 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = in_dim // num_heads
 
-        self.qkv_proj = MPLinearChunk(in_dim, in_dim, 3)
+        self.qkv_proj = MPLinearChunk(in_dim, in_dim, 3, normal_init=True)
         self.out_proj = MPLinear(in_dim, in_dim)
 
         self.scale = 1.0 / math.sqrt(self.head_dim)

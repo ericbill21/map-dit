@@ -87,7 +87,9 @@ class DiT(nn.Module):
         y = self.y_embedder(y, self.training)                                   # (N, D)
         c = mp_sum(t, y, t=0.5)                                                 # (N, D)
 
-        for block in self.blocks:
+        for idx, block in enumerate(self.blocks):
+            # from src.utils import magnitude
+            # print(f"BLock {idx:2d}: x={magnitude(x):.2f} c={magnitude(c):.2f}")
             x = block(x, c)
 
         if self.learn_sigma:

@@ -50,14 +50,18 @@ class MPLinearChunk(nn.Module):
         self,
         in_dim: int,
         out_dim: int,
-        n_chunks: int
+        n_chunks: int,
+        normal_init: bool=False,
     ):
         super().__init__()
 
         self.in_dim = in_dim
         self.n_chunks = n_chunks
         self.weight = nn.Parameter(torch.empty(n_chunks * out_dim, in_dim))
+
+   
         nn.init.normal_(self.weight)
+   
         
     def forward(self, x):
         # Forced weight normalization
