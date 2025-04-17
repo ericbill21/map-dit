@@ -9,18 +9,6 @@ from src.basic.mp_linear import MPLinear, MPLinearChunk
 from src.utils import modulate, normalize
 
 
-class MPScale(nn.Module):
-    def __init__(self, in_dim: int, angle_dim: int=8, zero_init: bool = True):
-        super().__init__()
-        self.angle_dim = angle_dim
-
-        self.linear = MPLinear(in_dim, angle_dim)
-        self.reference = nn.Parameter(torch.zeros(angle_dim) if zero_init else torch.ones(angle_dim))
-
-    def forward(self, x):
-        angle =  torch.matmul(self.linear(x), self.reference) / math.sqrt(self.angle_dim)
-        return F.sigmoid(angle)
-
 class FinalLayer(nn.Module):
     """The final layer of DiT."""
 
@@ -34,6 +22,7 @@ class FinalLayer(nn.Module):
         super().__init__()
 
         self.learn_sigma = learn_sigma
+        
         self.linear = MPLinearChunk(
             hidden_size,
             patch_size * patch_size * out_channels,
@@ -42,20 +31,17 @@ class FinalLayer(nn.Module):
 
         self.modulation = nn.Sequential(
             MPSiLU(),
-            MPLinearChunk(hidden_size, hidden_size, 2),
+            nn.Linear(hidden_size, (1 + learn_sigma) * patch_size * patch_size * out_channels, bias=False),
         )
-        self.gain_mod = nn.Parameter(torch.tensor(0.0))
-
-        # Allowing the model to learn the scale of the mean and sigma
-        self.mean_scale = MPScale(hidden_size, zero_init=False)
-        if learn_sigma: self.sigma_scale = MPScale(hidden_size, zero_init=True)
 
     def forward(self, x, c):
-        shift, scale = self.modulation(c)
-        x_mod = modulate(x, shift, scale, t=self.gain_mod)
-
         if self.learn_sigma:
-            mean, sigma = self.linear(x_mod)
-            return mean * self.mean_scale(c).view(-1, 1, 1), sigma * self.sigma_scale(c).view(-1, 1, 1)
+            gate_mean, gate_sigma = self.modulation(c).chunk(2, dim=-1)
+            mean, sigma = self.linear(x)
+
+            return gate_mean.unsqueeze(1) * mean, gate_sigma.unsqueeze(1) * sigma
         else:
-            return self.linear(x_mod) * self.mean_scale(c)
+            gate_mean = self.modulation(c)
+            mean = self.linear(x)
+
+            return gate_mean.unsqueeze(1) * mean

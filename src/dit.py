@@ -23,6 +23,7 @@ class DiT(nn.Module):
         mlp_ratio: float=4.0,
         class_dropout_prob: float=0.1,
         num_classes: int=1000,
+        use_no_shift: bool=False,
         learn_sigma: bool=True,
     ):
         super().__init__()
@@ -52,6 +53,7 @@ class DiT(nn.Module):
                 hidden_size,
                 num_heads,
                 mlp_ratio=mlp_ratio,
+                use_no_shift=use_no_shift,
             ) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(

@@ -18,7 +18,7 @@ from diffusion import create_diffusion
 
 def main(args):
     torch.manual_seed(args.seed)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"# "cuda" if torch.cuda.is_available() else "cpu"
 
     # Setup experiment directory
     exp_dir = setup_experiment(args.model, args.results_dir)
@@ -53,8 +53,20 @@ def main(args):
 
     ema = EMA(model, results_dir=exp_dir, stds=[0.05, 0.1])
 
-    # Optimizer
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.99))
+    # Optimizer, lower learning rate for non magnetic preserving parameters
+    mp_params, non_mp_params = [], []
+    for name, param in model.named_parameters():
+        if "modulation" in name:
+            print(name)
+            non_mp_params.append(param)
+        else:
+            mp_params.append(param)
+
+    logger.info(f"mp params: {len(mp_params)}, non-mp params: {len(non_mp_params)}")
+    opt = torch.optim.Adam([
+        {"params" : mp_params, "lr" : args.lr, "betas" : (0.9, 0.99)},
+        {"params" : non_mp_params, "lr" : 1e-4, "betas" : (0.9, 0.99)}
+    ])
 
     # Setup learning rate scheduler 
     if args.num_lin_warmup is None:
@@ -245,5 +257,8 @@ if __name__ == "__main__":
     # EMA
     parser.add_argument("--ema-snapshot-every", type=int, default=None, help="Number of steps to save EMA snapshots")
 
+    # Model
+    parser.add_argument("--use_no_shift", action="store_true", help="Disable shift in the model")
+    
     args = parser.parse_args()
     main(args)

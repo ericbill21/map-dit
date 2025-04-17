@@ -14,6 +14,7 @@ def get_model(args):
         in_channels=args["in_channels"],
         input_size=args["input_size"],
         num_classes=args["num_classes"],
+        use_no_shift=args["use_no_shift"],
     ) 
 
 

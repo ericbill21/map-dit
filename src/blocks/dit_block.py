@@ -15,23 +15,31 @@ class DiTBlock(nn.Module):
         hidden_size: int,
         num_heads: int,
         mlp_ratio: float=4.0,
+        use_no_shift: bool=False,
     ):
         super().__init__()
 
         self.attn = Attention(hidden_size, num_heads)
         self.mlp = MLP(hidden_size, hidden_size, mlp_ratio=mlp_ratio)
-        
+
+        self.use_no_shift = use_no_shift
+
+        num_modalities = 4 if use_no_shift else 6
         self.modulation = nn.Sequential(
             MPSiLU(),
-            MPLinearChunk(hidden_size, hidden_size, 6),
+            nn.Linear(hidden_size, num_modalities * hidden_size, bias=False),
         )
-        self.gain_msa = nn.Parameter(torch.tensor(0.0))
-        self.gain_mlp = nn.Parameter(torch.tensor(0.0))
-
+        nn.init.zeros_(self.modulation[1].weight)
 
     def forward(self, x, c):
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c)
+        if self.use_no_shift:
+            scale_msa, gate_msa, scale_mlp, gate_mlp = self.modulation(c).chunk(4, dim=-1)
+            shift_msa = torch.zeros_like(scale_msa)
+            shift_mlp = torch.zeros_like(scale_mlp)
+        
+        else:
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modulation(c).chunk(6, dim=-1)
 
-        x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(modulate(x, shift_msa, scale_msa, self.gain_msa)), t=0.3)
-        x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp(modulate(x, shift_mlp, scale_mlp, self.gain_mlp)), t=0.3)
+        x = mp_sum(x, gate_msa.unsqueeze(1) * self.attn(modulate(x, shift_msa, scale_msa)), t=0.3)
+        x = mp_sum(x, gate_mlp.unsqueeze(1) * self.mlp( modulate(x, shift_mlp, scale_mlp)), t=0.3)
         return x
