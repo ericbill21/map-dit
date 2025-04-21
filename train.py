@@ -11,7 +11,6 @@ import os
 import math
 
 from src.models import DIT_MODELS
-from src.ema import EMA
 from utils import get_model, create_logger
 from diffusion import create_diffusion
 
@@ -47,14 +46,21 @@ def main(args):
 
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
-    # Setup EMA for the model (default: 250 snapshots)
-    if args.ema_snapshot_every is None:
-        args.ema_snapshot_every = args.num_steps // 250
+    # Optimizer: Set LR=1e-4 for nn.Linear layers, because they are not MP
+    linear_params = []
+    other_params = []
 
-    ema = EMA(model, results_dir=exp_dir, stds=[0.05, 0.1])
+    for module in model.modules():
+        if isinstance(module, torch.nn.Linear):
+            linear_params.extend(list(module.parameters()))
+        else:
+            for param in module.parameters(recurse=False):
+                other_params.append(param)
 
-    # Optimizer
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.99))
+    opt = torch.optim.Adam([
+        {"params": linear_params, "lr": 1e-4},
+        {"params": other_params, "lr": args.lr}
+    ], betas=(0.9, 0.99))
 
     # Setup learning rate scheduler 
     if args.num_lin_warmup is None:
@@ -93,16 +99,14 @@ def main(args):
             # Update weights
             opt.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.1)
             opt.step()
+            scheduler.step()
 
             # Logging
             running_loss += loss.item()
             log_steps += 1
             train_steps += 1
-
-            # Update EMA
-            scheduler.step()
-            ema.update(train_steps, model)
 
             if train_steps % args.log_every == 0:
                 # Measure training speed
@@ -130,11 +134,6 @@ def main(args):
                 checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
                 logger.info(f"saving checkpoint to {checkpoint_path} at step {train_steps}...")
                 torch.save(checkpoint, checkpoint_path)
-
-            # Save EMA snapshot
-            if train_steps % args.ema_snapshot_every == 0 and args.ema_snapshot_every != 0 and train_steps > 0:
-                logger.info(f"saving ema snapshot to {ema.ema_dir} at step {train_steps}...")
-                ema.save_snapshot(train_steps)
 
         epochs += 1
     
@@ -241,9 +240,6 @@ if __name__ == "__main__":
     # Learning rate scheduler
     parser.add_argument("--num-lin-warmup", type=int, default=None, help="Number of steps for linear warmup of the learning rate")
     parser.add_argument("--start-decay", type=int, default=None, help="Step to start decaying the learning rate")
-
-    # EMA
-    parser.add_argument("--ema-snapshot-every", type=int, default=None, help="Number of steps to save EMA snapshots")
 
     args = parser.parse_args()
     main(args)

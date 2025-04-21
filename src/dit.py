@@ -44,7 +44,7 @@ class DiT(nn.Module):
 
         # Normalize the positional embedding as its a constant
         pos_embed = torch.from_numpy(get_2d_sincos_pos_embed(hidden_size, input_size // patch_size)).float().unsqueeze(0)
-        pos_embed = normalize(pos_embed)
+        pos_embed = normalize(pos_embed - pos_embed.mean(dim=-1, keepdim=True))
         self.register_buffer("pos_embed", pos_embed)
 
         self.blocks = nn.ModuleList([
@@ -58,7 +58,6 @@ class DiT(nn.Module):
             hidden_size,
             patch_size,
             self.out_channels,
-            learn_sigma=learn_sigma,
         )
     
     def ckpt_wrapper(self, module):
@@ -77,10 +76,9 @@ class DiT(nn.Module):
         Returns: (N, C, H, W)
         """
 
-        # Extract patches into features
+        # Extract patches into features and add positional embedding
         x = patchify(x, self.patch_size)                                        # (N, T, (patch_size ** 2) * in_channels)
         x = torch.cat([x, torch.ones_like(x[:, :, :1])], dim=-1)                # (N, T, (patch_size ** 2) * in_channels + 1)
-
         x = mp_sum(self.x_embedder(x), self.pos_embed, t=0.5)                   # (N, T, D)
    
         t = self.t_embedder(t)                                                  # (N, D)
@@ -90,23 +88,18 @@ class DiT(nn.Module):
         for block in self.blocks:
             x = block(x, c)
 
-        if self.learn_sigma:
-            mean, sigma = self.final_layer(x, c)                                    # 2 * (N, T, patch_size ** 2 * out_channels)
-            out = torch.cat([
-                unpatchify(mean, self.input_size, self.patch_size),
-                unpatchify(sigma, self.input_size, self.patch_size)
-            ], dim=1)
-        else:
-            mean = self.final_layer(x, c)                                           # (N, T, patch_size ** 2 * out_channels)
-            out = unpatchify(mean, self.input_size, self.patch_size)
+        mean, variance = self.final_layer(x, c)
 
-        return out
+        return torch.cat([
+            unpatchify(mean, self.input_size, self.patch_size),
+            unpatchify(variance, self.input_size, self.patch_size)
+        ], dim=1)                                                               # (N, T, patch_size ** 2 * out_channels * 2)
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
         """Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance."""
 
         # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
-        half = x[: len(x) // 2]
+        half = x[:len(x)//2]
         combined = torch.cat([half, half], dim=0)
         model_out = self.forward(combined, t, y)
         eps, rest = model_out[:, :self.in_channels], model_out[:, self.in_channels:]

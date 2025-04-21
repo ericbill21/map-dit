@@ -101,7 +101,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--result-dir", type=str, required=True)
     parser.add_argument("--use-vae", type=bool, default=True)
-    parser.add_argument("--cfg-scale", type=float, default=1.5)
+    parser.add_argument("--cfg-scale", type=float, default=1.0)
     parser.add_argument("--num-classes", type=int, default=1_000)
     parser.add_argument("--num-samples", type=int, default=10_000)
     parser.add_argument("--batch-size", type=int, default=128)

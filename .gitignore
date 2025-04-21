@@ -64,3 +64,7 @@ EricsPlayground.ipynb
 data/
 result/
 samples/
+venv/
+dataset/
+*.ipynb
+results/

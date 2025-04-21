@@ -30,9 +30,9 @@ class MPLinear(nn.Module):
     def forward(self, x):
         """
         Args:
-            x: (...B, in_dim)
+            x (Tensor): Shape (...B, in_dim)
         
-        Returns: (...B, out_dim)
+        Returns: Shape (...B, out_dim)
         """
         # Forced weight normalization
         if self.training:
@@ -42,8 +42,8 @@ class MPLinear(nn.Module):
         # Traditional weight normalization (makes sure that the gradient is perpendicular to the
         # weights)
         w = normalize(self.weight) * (self.gain / math.sqrt(self.in_dim))
-
         return F.linear(x, w)
+
 
 class MPLinearChunk(nn.Module):
     def __init__(
