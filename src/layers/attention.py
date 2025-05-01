@@ -7,11 +7,7 @@ from src.utils import normalize
 
 
 class Attention(nn.Module):
-    def __init__(
-        self,
-        in_dim: int,
-        num_heads: int,
-    ):
+    def __init__(self, in_dim: int, num_heads: int):
         super().__init__()
 
         assert in_dim % num_heads == 0

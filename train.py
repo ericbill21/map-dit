@@ -1,16 +1,17 @@
 import torch
+import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch.optim.lr_scheduler import LambdaLR
 from torchvision import transforms
 from glob import glob
 from time import time
-import copy
 import yaml
 import argparse
 import os
 import math
 
 from src.models import DIT_MODELS
+from src.ema import EMA
 from utils import get_model, create_logger
 from diffusion import create_diffusion
 
@@ -30,26 +31,31 @@ def main(args):
     loader = DataLoader(dataset, batch_size=int(args.batch_size), num_workers=args.num_workers, shuffle=True, pin_memory=True, drop_last=True)
     logger.info(f"dataset contains {len(dataset):,} data points ({args.data_path}, {dataset.channels}x{dataset.data_size}x{dataset.data_size})")
 
-    # Save arguments
+    # We want to save these for when we sample
     args.in_channels = dataset.channels
     args.input_size = dataset.data_size
     args.stats_std = [float(x) for x in dataset.stats["std"]]
     args.stats_mean = [float(x) for x in dataset.stats["mean"]]
+
+    # Save arguments
     with open(os.path.join(exp_dir, "config.yaml"), "w") as f:
         yaml.dump(vars(args), f)
 
     # Setup diffusion process
-    diffusion = create_diffusion(timestep_respacing="")
+    diffusion = create_diffusion("")
 
+    # Setup model
     model = get_model(args).to(device)
     model = torch.compile(model)
+    
+    if args.use_ema:
+        ema = EMA(model, exp_dir, stds=[0.05, 0.1])
 
     logger.info(f"model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     # Optimizer: Set LR=1e-4 for nn.Linear layers, because they are not MP
     linear_params = []
     other_params = []
-
     for module in model.modules():
         if isinstance(module, torch.nn.Linear):
             linear_params.extend(list(module.parameters()))
@@ -58,18 +64,12 @@ def main(args):
                 other_params.append(param)
 
     opt = torch.optim.Adam([
-        {"params": linear_params, "lr": 1e-4},
-        {"params": other_params, "lr": args.lr}
+        { "params": linear_params, "lr": 1e-4 },
+        { "params": other_params, "lr": 1e-2 },
     ], betas=(0.9, 0.99))
 
-    # Setup learning rate scheduler 
-    if args.num_lin_warmup is None:
-        args.num_lin_warmup = args.num_steps // 150
-
-    if args.start_decay is None:
-        args.start_decay = args.num_steps // 10
-
-    scheduler = LambdaLR(opt, create_lr_lambda(args.num_lin_warmup, args.start_decay))
+    # Learning rate scheduler
+    scheduler = LambdaLR(opt, create_lr_lambda(args.num_steps // 150, args.num_steps // 10))
 
     # Important! (This enables embedding dropout for CFG)
     model.train()
@@ -99,7 +99,7 @@ def main(args):
             # Update weights
             opt.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.1)
+            nn.utils.clip_grad_norm_(model.parameters(), 0.1)
             opt.step()
             scheduler.step()
 
@@ -107,6 +107,9 @@ def main(args):
             running_loss += loss.item()
             log_steps += 1
             train_steps += 1
+
+            if args.use_ema:
+                ema.update(train_steps, model)
 
             if train_steps % args.log_every == 0:
                 # Measure training speed
@@ -129,11 +132,16 @@ def main(args):
                 checkpoint = {
                     "model": model.state_dict(),
                     "opt": opt.state_dict(),
+                    "scheduler": scheduler.state_dict(),
                 }
 
                 checkpoint_path = os.path.join(exp_dir, "checkpoints", f"{train_steps:07d}.pt")
                 logger.info(f"saving checkpoint to {checkpoint_path} at step {train_steps}...")
                 torch.save(checkpoint, checkpoint_path)
+
+            if args.use_ema and train_steps % (args.num_steps // 250) == 0:
+                logger.info(f"saving ema snapshot to {ema.ema_dir} at step {train_steps}...")
+                ema.save_snapshot(train_steps)
 
         epochs += 1
     
@@ -230,16 +238,17 @@ if __name__ == "__main__":
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--num-steps", type=int, default=400_000)
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--verbose", type=int, help="0: warning, 1: info, 2: debug", choices=[0, 1, 2], default=1)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--use-ema", action="store_true", default=False)
 
-    # Learning rate scheduler
-    parser.add_argument("--num-lin-warmup", type=int, default=None, help="Number of steps for linear warmup of the learning rate")
-    parser.add_argument("--start-decay", type=int, default=None, help="Step to start decaying the learning rate")
+    parser.add_argument("--use-scale-mod", action="store_true", default=False)
+    parser.add_argument("--use-shift-mod", action="store_true", default=False)
+    parser.add_argument("--use-gate-mod", action="store_true", default=False)
+    parser.add_argument("--use-rotation-mod", action="store_true", default=False)
 
     args = parser.parse_args()
     main(args)

@@ -8,10 +8,6 @@ def magnitude(x: torch.Tensor) -> torch.Tensor:
     return x.square().mean(-1).sqrt().mean()
 
 
-def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-    return mp_sum(x * (1 + scale.unsqueeze(1)), shift.unsqueeze(1), t=0.5)
-
-
 def mp_sum(a: torch.Tensor, b: torch.Tensor, t=0.5) -> torch.Tensor:
     return a.lerp(b, t) / math.sqrt((1 - t) ** 2 + t ** 2)
 

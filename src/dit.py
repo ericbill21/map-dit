@@ -17,23 +17,25 @@ class DiT(nn.Module):
         depth: int,
         hidden_size: int,
         patch_size: int,
-        input_size: int=32,
-        in_channels: int=3,
-        num_heads: int=16,
-        mlp_ratio: float=4.0,
-        class_dropout_prob: float=0.1,
-        num_classes: int=1000,
-        learn_sigma: bool=True,
+        input_size=32,
+        in_channels=3,
+        num_heads=16,
+        mlp_ratio=4.0,
+        class_dropout_prob=0.1,
+        num_classes=1000,
+        scale_mod=True,
+        shift_mod=True,
+        gate_mod=True,
+        rotation_mod=False,
     ):
         super().__init__()
 
-        self.learn_sigma = learn_sigma
         self.in_channels = in_channels
-        self.out_channels = in_channels
+        self.out_channels = 2 * in_channels
         self.input_size = input_size
         self.patch_size = patch_size
         self.num_heads = num_heads
-    
+
         # Add one to the in_channels for input bias
         self.x_embedder = MPLinear(
             patch_size * patch_size * in_channels + 1,
@@ -42,7 +44,7 @@ class DiT(nn.Module):
         self.t_embedder = TimestepEmbedder(hidden_size)
         self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
 
-        # Normalize the positional embedding as its a constant
+        # Normalize the positional embedding as it is a constant
         pos_embed = torch.from_numpy(get_2d_sincos_pos_embed(hidden_size, input_size // patch_size)).float().unsqueeze(0)
         pos_embed = normalize(pos_embed - pos_embed.mean(dim=-1, keepdim=True))
         self.register_buffer("pos_embed", pos_embed)
@@ -52,12 +54,19 @@ class DiT(nn.Module):
                 hidden_size,
                 num_heads,
                 mlp_ratio=mlp_ratio,
+                scale_mod=scale_mod,
+                shift_mod=shift_mod,
+                gate_mod=gate_mod,
+                rotation_mod=rotation_mod,
             ) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(
             hidden_size,
             patch_size,
             self.out_channels,
+            scale_mod=scale_mod,
+            shift_mod=shift_mod,
+            rotation_mod=rotation_mod,
         )
     
     def ckpt_wrapper(self, module):
@@ -76,24 +85,20 @@ class DiT(nn.Module):
         Returns: (N, C, H, W)
         """
 
-        # Extract patches into features and add positional embedding
+        # Extract patches into features, add positional embedding, and add bias
         x = patchify(x, self.patch_size)                                        # (N, T, (patch_size ** 2) * in_channels)
         x = torch.cat([x, torch.ones_like(x[:, :, :1])], dim=-1)                # (N, T, (patch_size ** 2) * in_channels + 1)
         x = mp_sum(self.x_embedder(x), self.pos_embed, t=0.5)                   # (N, T, D)
    
         t = self.t_embedder(t)                                                  # (N, D)
         y = self.y_embedder(y, self.training)                                   # (N, D)
-        c = mp_sum(t, y, t=0.5)                                                 # (N, D)
+        c = mp_sum(t, y, t=0.5)
 
         for block in self.blocks:
             x = block(x, c)
 
-        mean, variance = self.final_layer(x, c)
-
-        return torch.cat([
-            unpatchify(mean, self.input_size, self.patch_size),
-            unpatchify(variance, self.input_size, self.patch_size)
-        ], dim=1)                                                               # (N, T, patch_size ** 2 * out_channels * 2)
+        x = self.final_layer(x, c)
+        return unpatchify(x, self.input_size, self.patch_size)
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
         """Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance."""

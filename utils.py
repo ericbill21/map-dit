@@ -14,8 +14,11 @@ def get_model(args):
         in_channels=args["in_channels"],
         input_size=args["input_size"],
         num_classes=args["num_classes"],
+        scale_mod=args["use_scale_mod"],
+        shift_mod=args["use_shift_mod"],
+        gate_mod=args["use_gate_mod"],
+        rotation_mod=args["use_rotation_mod"],
     ) 
-
 
 def create_logger(logging_dir: Optional[str]=None, verbose: int=1):
     verbose_map = {0: logging.WARNING, 1: logging.INFO, 2: logging.DEBUG}
