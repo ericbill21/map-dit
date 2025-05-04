@@ -46,7 +46,6 @@ def main(args):
 
     # Setup model
     model = get_model(args).to(device)
-    model = torch.compile(model)
     
     if args.use_ema:
         ema = EMA(model, exp_dir, stds=[0.05, 0.1])
