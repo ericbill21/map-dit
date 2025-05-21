@@ -44,8 +44,8 @@ class DiTBlock(nn.Module):
             self.gate1 = ScaleModulation(hidden_size, hidden_size)
             self.gate2 = ScaleModulation(hidden_size, hidden_size)
         else:
-            self.gate1 = nn.Identity()
-            self.gate2 = nn.Identity()
+            self.gate1 = lambda x, c: x
+            self.gate2 = lambda x, c: x
 
     def forward(self, x, c):
         x = mp_sum(x, self.gate1(self.attn(self.mod1(x, c)), c), t=0.3)
