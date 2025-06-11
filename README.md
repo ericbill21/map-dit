@@ -1,6 +1,6 @@
-# The Art of Balance: Magnitude Preservation in Diffusion Transformers
-## [📝Paper](https://ericbill21.github.io/MP_in_DiT.pdf)
-We extend magnitude-preserving techniques from the EDM2 architecture to Diffusion Transformers (DiT), ensuring stable training by maintaining activation magnitudes and controlling weight growth throughout the architecture. Additionally, we incorporate power function-based exponential moving averages, enabling flexible post-training reconstruction with adjustable decay parameters. Experiments on DiT-XS/2 and DiT-S/4 show significant improvements in FID-10K, highlighting the effectiveness of our approach. Despite increased computational overhead, our methods offer a scalable and modular solution for transformer-based diffusion models.
+# Exploring Magnitude Preservation and Rotation Modulation in Diffusion Transformers
+## [📝Read the paper on arXiv](https://arxiv.org/abs/2505.19122)
+Denoising diffusion models exhibit remarkable generative capabilities, but remain challenging to train due to their inherent stochasticity, where high-variance gradient estimates lead to slow convergence. Previous works have shown that magnitude preservation helps with stabilizing training in the U-net architecture. This work explores whether this effect extends to the Diffusion Transformer (DiT) architecture. As such, we propose a magnitude-preserving design that stabilizes training without normalization layers. Motivated by the goal of maintaining activation magnitudes, we additionally introduce rotation modulation, which is a novel conditioning method using learned rotations instead of traditional scaling or shifting. Through empirical evaluations and ablation studies on small-scale models, we show that magnitude-preserving strategies significantly improve performance, notably reducing FID scores by $`\sim`$12.8\%. Further, we show that rotation modulation combined with scaling is competitive with AdaLN, while requiring $`\sim`$5.4\% fewer parameters. This work provides insights into conditioning strategies and magnitude control.
 
 <p align="center">
   <img src="visuals/A-S-4.png" />
@@ -45,6 +45,9 @@ Below, we present some preliminary results of using magnitude preservation (righ
   <p align="center"><b>Fig 4.</b> DiT-S/2 samples of <em>Mushroom</em> without (left) and with (right) magnitude preserving layers.</p>
 </p> -->
 
+# 🚧 Code Status: Work in Progress
+We're actively developing this repo. Contributions and feedback are welcome!
+
 ## Training
 
 ```bash
@@ -71,10 +74,13 @@ python sample.py --result-dir /path/to/results/<dir> --class-label <class label>
 ## Citation
 
 ```bibtex
-@misc{bill_jensen_2025,
-    title={The Art of Balance: Magnitude Preservation in Diffusion Transformers},
-    author={Bill, Eric Tillmann and Jensen, Cristian Perez},
-    howpublished = {\url{https://github.com/ericbill21/map-dit}},
-    year={2025}
+@misc{bill2025exploringmagnitudepreservationrotation,
+      title={Exploring Magnitude Preservation and Rotation Modulation in Diffusion Transformers}, 
+      author={Eric Tillman Bill and Cristian Perez Jensen and Sotiris Anagnostidis and Dimitri von Rütte},
+      year={2025},
+      eprint={2505.19122},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2505.19122}, 
 }
 ```
